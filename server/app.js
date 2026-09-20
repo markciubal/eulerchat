@@ -22,13 +22,14 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { World, seed } from './store.js';
 import { populate } from './populate.js';
+import { Sessions } from './sessions.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(here, '..', 'public');
 const libDir = path.join(here, '..', 'lib');
 const projectRoot = path.join(here, '..');
 
-export { World, seed, populate };
+export { World, seed, populate, Sessions };
 
 /**
  * @param {object} [options]
@@ -40,6 +41,8 @@ export { World, seed, populate };
 export function createEulerChat(options = {}) {
   const { world = seed(new World()), serveClient = true } = options;
   const server = options.server ?? http.createServer();
+  // Connections live here rather than on the world; see server/sessions.js.
+  const sessions = options.sessions ?? new Sessions();
 
   // --- static ---------------------------------------------------------------
 
@@ -110,7 +113,7 @@ export function createEulerChat(options = {}) {
    * you see?) and only the ones that answer yes pay for a solve.
    */
   const pushDiagrams = () => {
-    for (const session of world.sessions.values()) {
+    for (const session of sessions) {
       const signature = world.viewSignature(session.userId);
       if (signature === session.lastView) continue;
       session.lastView = signature;
@@ -125,7 +128,7 @@ export function createEulerChat(options = {}) {
    */
   const HEARTBEAT_MS = 25_000;
   const heartbeat = setInterval(() => {
-    for (const session of world.sessions.values()) {
+    for (const session of sessions) {
       // A socket can be closing while its close event is still queued, and
       // pinging one then makes `ws` emit an error rather than return quietly.
       // One unhealthy connection must not be able to stop the heartbeat for
@@ -157,8 +160,7 @@ export function createEulerChat(options = {}) {
   wss.on('connection', (socket) => {
     const sessionId = crypto.randomUUID().slice(0, 8);
     let userId = world.addUser(`guest-${sessionId.slice(0, 4)}`);
-    const session = { id: sessionId, userId, socket };
-    world.sessions.set(sessionId, session);
+    const session = sessions.open(sessionId, userId, socket);
 
     socket.alive = true;
     socket.on('pong', () => {
@@ -227,8 +229,7 @@ export function createEulerChat(options = {}) {
 
             world.removeUser(userId); // discard the guest made a moment ago
             userId = claimed;
-            session.userId = claimed;
-            session.lastView = null;
+            sessions.reassign(sessionId, claimed);
 
             send(socket, { type: 'welcome', you: { ...world.profiles.get(userId) }, maxArity: 3 });
             send(socket, { type: 'history', rooms: world.historyFor(userId) });
@@ -280,8 +281,11 @@ export function createEulerChat(options = {}) {
 
           case 'post': {
             const message = world.post(userId, msg.tags ?? [], msg.body);
-            for (const session of world.recipientsOf(message.subjects)) {
-              send(session.socket, { type: 'message', message });
+            // Only people with a connection open can be sent anything, so the
+            // audience search is narrowed to them rather than to every member.
+            const audience = world.audienceFor(message.subjects, sessions.present());
+            for (const listener of sessions.reaching(audience)) {
+              send(listener.socket, { type: 'message', message });
             }
             break;
           }
@@ -295,7 +299,7 @@ export function createEulerChat(options = {}) {
     });
 
     socket.on('close', () => {
-      world.sessions.delete(sessionId);
+      sessions.close(sessionId);
 
       const leaving = userId;
       orphans.set(
@@ -312,6 +316,7 @@ export function createEulerChat(options = {}) {
 
   return {
     world,
+    sessions,
     server,
     wss,
     close() {

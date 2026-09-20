@@ -39,7 +39,7 @@ for (const [event, label] of [
   process.on(event, (err) => {
     console.error(
       `eulerchat: ${label} — ${err?.stack ?? err}\n` +
-        `  ${world.sessions.size} sessions, ${world.subjects.size} subjects, ` +
+        `  ${chat.sessions.size} sessions, ${world.subjects.size} subjects, ` +
         `${world.members.size} members at the time`,
     );
     process.exit(1);

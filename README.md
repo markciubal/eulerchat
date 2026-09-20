@@ -86,9 +86,34 @@ const chat = createEulerChat({
   serveClient: true,          // also serve the bundled UI
 });
 
-chat.world;  // live state — post(), recipientsOf(), diagramFor(), atlasFor()
+chat.world;     // membership, messages, diagramFor(), atlasFor()
+chat.sessions;  // who is connected, and on what
 chat.close();
 ```
+
+### Or bring your own transport
+
+The `World` holds no connections. Delivery is a question about membership, and
+it answers with people:
+
+```js
+const audience = world.audienceFor(['art', 'philosophy']);  // user ids
+```
+
+Where those people currently are is a separate concern, and `Sessions` is one
+answer to it — but anything will do, because nothing in the world requires a
+socket:
+
+```js
+import { Sessions } from 'eulerchat/app';
+
+const live = new Sessions();          // generic over whatever a connection is
+live.open('s1', userId, myChannel);
+for (const s of live.reaching(audience)) s.socket.send(payload);
+```
+
+One person may hold several connections at once — two tabs, a phone and a
+laptop — and `forUser`, `present` and `reaching` are all written for that.
 
 Importing this does not bind a port or read `process.argv`. The CLI
 (`npx eulerchat`) is a thin wrapper that adds those and a crash reporter.

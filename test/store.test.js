@@ -60,19 +60,20 @@ test('delivery reaches supersets and nobody else', () => {
   const w = new World();
   for (const s of ['art', 'philosophy']) w.addSubject(s);
 
+  // No sockets anywhere: delivery is a question about membership, and the
+  // answer is people. Turning people into bytes is the transport's business.
+  const people = new Map();
   const mk = (name, subjects) => {
     const userId = w.addUser(name);
     for (const s of subjects) w.join(userId, s);
-    const session = { id: name, userId, socket: { readyState: 1 } };
-    w.sessions.set(name, session);
-    return session;
+    people.set(userId, name);
   };
 
   mk('artist', ['art']);
   mk('philosopher', ['philosophy']);
   mk('both', ['art', 'philosophy']);
 
-  const named = (tags) => w.recipientsOf(tags).map((s) => s.id).sort();
+  const named = (tags) => w.audienceFor(tags).map((id) => people.get(id)).sort();
 
   // An art post reaches the art-only reader AND the overlap reader. The person
   // who loves both is never cut out of either circle they joined.

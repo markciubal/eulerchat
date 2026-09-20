@@ -36,7 +36,6 @@ export class World {
     /** @type {Map<string, {id: string, name: string}>} */ this.profiles = new Map();
     /** @type {Map<string, Set<string>>} */ this.members = new Map();
     /** @type {Map<string, Array>} */ this.messages = new Map();
-    /** @type {Map<string, {id: string, userId: string, socket: any}>} */ this.sessions = new Map();
     this._census = null;
     this._layouts = new Map();
   }
@@ -380,14 +379,24 @@ export class World {
   }
 
   /**
-   * The delivery rule, applied to live sockets: a message tagged T reaches
-   * every session whose subscription contains T.
+   * Who a message reaches: every user whose subscription contains `tags`.
+   *
+   * Returns user ids, not connections. The World used to hold the live sockets
+   * itself and hand back sessions, which meant anyone wanting the routing for
+   * a different transport — polling, server-sent events, a queue, a game loop
+   * — had to invent a socket-shaped object to satisfy it. Who should hear a
+   * message is a question about membership; turning that into bytes is not.
+   *
+   * `among` narrows the search, since a caller with connections open knows the
+   * few thousand members can be skipped in favour of the few dozen present.
    */
-  recipientsOf(tags) {
+  audienceFor(tags, among = this.members.keys()) {
     const room = canonical(tags);
-    return [...this.sessions.values()].filter((s) =>
-      receives(this.subscription(s.userId), room),
-    );
+    const out = [];
+    for (const userId of among) {
+      if (receives(this.subscription(userId), room)) out.push(userId);
+    }
+    return out;
   }
 
   /** Backlog for every room this person can see, newest last. */
