@@ -17,6 +17,12 @@ import { atlas } from '../lib/atlas.js';
 const now = () => Date.now();
 const id = () => crypto.randomUUID().slice(0, 8);
 
+/** Bounds the cubic term in `census`; see `join`. */
+export const MAX_SUBSCRIPTIONS = 32;
+
+/** Bounds the catalogue, which is otherwise unbounded memory; see `addSubject`. */
+export const MAX_SUBJECTS = 50_000;
+
 /** Region populations, canonically ordered — identical censuses, identical string. */
 const censusSignature = (counts) =>
   [...counts]
@@ -40,6 +46,9 @@ export class World {
   addSubject(name) {
     const subject = String(name).trim().toLowerCase();
     if (!/^[a-z0-9][a-z0-9 -]{0,30}$/.test(subject)) throw new Error('unusable subject name');
+    if (!this.subjects.has(subject) && this.subjects.size >= MAX_SUBJECTS) {
+      throw new Error('the catalogue is full');
+    }
     // No census change: a subject nobody holds occupies no region.
     this.subjects.add(subject);
     return subject;
@@ -61,6 +70,16 @@ export class World {
     if (!this.subjects.has(subject)) throw new Error(`no such subject: ${subject}`);
     const held = this.members.get(userId);
     if (!held || held.has(subject)) return;
+
+    // The census enumerates every subset of a subscription up to arity three,
+    // so its cost is cubic in how much one person holds. Unbounded, a single
+    // client holding three hundred subjects builds four and a half million
+    // regions and puts every view — everyone's, not just theirs — over a
+    // second. Nobody is shown more than three subjects at once, so there is no
+    // legitimate reason to hold a hundred.
+    if (held.size >= MAX_SUBSCRIPTIONS) {
+      throw new Error(`you can hold at most ${MAX_SUBSCRIPTIONS} subjects — leave one first`);
+    }
 
     this.#touch(held, subject, +1);
     held.add(subject);

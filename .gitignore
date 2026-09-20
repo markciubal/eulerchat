@@ -5,3 +5,4 @@ node_modules/
 
 # Stray file from a notify hook that wrote to an unexpanded path string.
 *claude-notify-signals*
+renders/

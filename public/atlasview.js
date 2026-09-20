@@ -72,6 +72,10 @@ export function renderAtlas(svg, view) {
       fill: stroke(curve.subject),
       stroke: stroke(curve.subject),
       class: `territory${held.has(curve.subject) ? ' mine' : ''}`,
+      // Plain alpha averages colours, so two opposite hues overlap into grey —
+      // the room where two subjects meet ends up looking switched off.
+      // Multiplying darkens instead, which is how overlap ought to read.
+      style: 'mix-blend-mode: multiply',
       'data-subject': cssId(curve.subject),
     });
     territories.set(curve.subject, patch);

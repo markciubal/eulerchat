@@ -268,10 +268,15 @@ still the thing you sit in and the atlas is something you ask for.
 | subjects | rooms | subjects split across patches | verdict |
 |---|---|---|---|
 | 3 | 7 | 0 | clean |
-| 4 | 14 | 2 | readable |
-| 5 | 20 | 4 | readable |
+| 4 | 14 | 2 | workable |
+| 5 | 20 | 4 | cluttered |
 | 6 | 30 | 6 | fragmented |
 | 8 | 41 | 8 | fragmented |
+
+Those verdicts come from looking at renders (`npm run render`), not from the
+numbers. Five was called readable until somebody looked at it: the big
+territories are fine but the middle fills with slivers, and a subject arriving
+in three pieces reads as three subjects that happen to share a colour.
 
 Areas stay exact at every size; what degrades is that a subject's territory
 arrives in several pieces instead of one. That is the known hard part of Euler
@@ -324,11 +329,26 @@ The pure algebra in `lib/` is already independent of where state lives; only
 - **Solving blocks the event loop.** Every layout runs on the main thread, so a
   burst of first paints stalls all other traffic. Fine at prototype
   concurrency, not at a thundering herd.
+- **Abuse is bounded, not solved.** A subscription is capped at 32 because the
+  census enumerates subsets up to arity three and is therefore cubic in what
+  one person holds — uncapped, a single client holding 300 subjects built 4.5
+  million regions and pushed *everyone's* view past a second. The catalogue is
+  capped, and each connection gets a leaky bucket priced by how expensive each
+  frame is. None of that is authentication.
 - **No moderation, no auth.** Derived rooms have a real unsolved question
   behind them: neither parent circle's moderators obviously own the
   intersection, and rooms grow exponentially while moderators do not.
 - **Anyone can create a subject.** Whoever controls circle creation controls
   whether the map stays legible; this prototype does not control it at all.
-- **Rendering is verified structurally, not visually.** The tests check that
-  clips and masks resolve, that every room owns clickable ground, and that no
-  drawn region lacks a room — but no browser has run this yet.
+- **Rendering is verified by rasteriser, not by browser.** `npm run render`
+  draws the real components through a DOM shim and rasterises them, which is
+  what caught the labels sitting on boundaries, the enclosed white holes, and
+  the overlap that came out grey. It does not exercise CSS, layout, blend
+  modes or any interaction — no browser has run this yet.
+- **The atlas can leave a lake.** Growth stops when zones reach their quota, so
+  a gap fully enclosed by territories can survive. Small ones are absorbed by
+  whichever neighbours are still short of their share; a large one stays, and
+  reads as a hole in the middle of the map.
+- **Subject colours can collide.** Hues come from a hash of the name, which is
+  stable across reloads but says nothing about what else is on screen, so a
+  view can come up with three neighbouring blues.

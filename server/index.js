@@ -131,12 +131,35 @@ wss.on('connection', (socket) => {
   send(socket, { type: 'history', rooms: world.historyFor(userId) });
   pushDiagrams();
 
+  /**
+   * A leaky bucket per connection.
+   *
+   * Every frame here is cheap on its own and ruinous in a loop: twenty
+   * thousand subjects can be created in sixteen milliseconds, and an atlas is
+   * a couple of hundred milliseconds of solving on the only thread there is.
+   * Costs are charged roughly in proportion to what the work actually takes.
+   */
+  const bucket = { tokens: 60, at: Date.now() };
+  const afford = (cost) => {
+    const elapsed = (Date.now() - bucket.at) / 1000;
+    bucket.at = Date.now();
+    bucket.tokens = Math.min(60, bucket.tokens + elapsed * 12);
+    if (bucket.tokens < cost) return false;
+    bucket.tokens -= cost;
+    return true;
+  };
+  const PRICE = { createSubject: 10, atlas: 8, post: 2, search: 1, join: 1, leave: 1 };
+
   socket.on('message', (raw) => {
     let msg;
     try {
       msg = JSON.parse(raw);
     } catch {
       return send(socket, { type: 'error', message: 'malformed frame' });
+    }
+
+    if (!afford(PRICE[msg?.type] ?? 1)) {
+      return send(socket, { type: 'error', message: 'slow down a moment' });
     }
 
     try {

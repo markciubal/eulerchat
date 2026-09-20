@@ -21,7 +21,8 @@
     "server",
     "public",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "tools"
   ],
   "engines": {
     "node": ">=20"
@@ -29,7 +30,8 @@
   "scripts": {
     "start": "node server/index.js",
     "start:large": "node server/index.js --interests 1000 --people 4000",
-    "test": "node --test"
+    "test": "node --test",
+    "render": "node tools/render.js"
   },
   "keywords": [
     "euler-diagram",
@@ -45,6 +47,7 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "linkedom": "^0.18.13"
   }
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { World, seed } from '../server/store.js';
+import { World, seed, MAX_SUBSCRIPTIONS, MAX_SUBJECTS } from '../server/store.js';
 import { populate, rng } from '../server/populate.js';
 import { MAX_ARITY, buildIndex, census } from '../lib/regions.js';
 
@@ -287,4 +287,52 @@ test('history is filtered by what the reader holds', () => {
   assert.ok(rooms.includes('art'));
   assert.ok(!rooms.includes('art+philosophy'));
   assert.ok(!rooms.includes('philosophy'));
+});
+
+test('one person cannot blow up the census for everybody', () => {
+  // The census enumerates subsets up to arity three, so its size is cubic in
+  // how much a single person holds. Before the cap, 300 subjects on one user
+  // built 4.5 million regions and put every view past a second.
+  const w = world();
+  const greedy = w.addUser('greedy');
+  for (let i = 0; i < 200; i++) w.addSubject(`topic ${i}`);
+
+  let joined = 0;
+  for (let i = 0; i < 200; i++) {
+    try {
+      w.join(greedy, `topic ${i}`);
+      joined++;
+    } catch (err) {
+      assert.match(err.message, /at most \d+ subjects/);
+      break;
+    }
+  }
+
+  assert.equal(joined, MAX_SUBSCRIPTIONS);
+  assert.equal(w.subscription(greedy).size, MAX_SUBSCRIPTIONS);
+
+  // Cubic in the cap rather than in whatever a client felt like sending.
+  const regions = w.census().size;
+  assert.ok(regions < 10_000, `census reached ${regions} regions`);
+
+  // Warm the census, index and layout cache first. Timing a cold call meant
+  // timing all three being built at once, which was over the bound about one
+  // run in three — and a test that fails at random teaches people to ignore it.
+  w.diagramFor(greedy);
+
+  const started = performance.now();
+  for (let i = 0; i < 5; i++) w.diagramFor(greedy);
+  const each = (performance.now() - started) / 5;
+  assert.ok(each < 40, `their view costs ${each.toFixed(1)}ms`);
+});
+
+test('the catalogue is bounded', () => {
+  const w = new World();
+  assert.equal(w.addSubject('art'), 'art');
+  assert.throws(() => w.addSubject('!!'), /unusable subject name/);
+
+  // Re-adding an existing subject is always allowed; only growth is capped.
+  w.subjects = new Set(Array.from({ length: MAX_SUBJECTS }, (_, i) => `s${i}`));
+  assert.throws(() => w.addSubject('one too many'), /catalogue is full/);
+  assert.equal(w.addSubject('s0'), 's0');
 });
