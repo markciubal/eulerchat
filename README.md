@@ -24,6 +24,88 @@ npm test
 node server/index.js --interests 300 --people 2000
 ```
 
+## Using it in your own project
+
+Three independent pieces, each usable without the others. Typed, ESM, and the
+library half has no dependencies at all.
+
+### Draw a diagram
+
+```js
+import { census, layout, toSVG } from 'eulerchat';
+
+const people = [
+  new Set(['art']), new Set(['art', 'philosophy']), new Set(['philosophy']),
+];
+
+const svg = toSVG(layout(census(people)), { title: 'interests' });
+```
+
+`toSVG` returns a standalone SVG string — no DOM, no stylesheet, styles
+inlined — so it can go to a file, an `<img>`, an HTTP response or a
+rasteriser. `census` counts by containment (a region's population is everyone
+holding *all* of its subjects), which is what circle areas mean.
+
+For more than three subjects, or any zone arity, use the atlas. It needs
+exclusive counts, so `zones` rather than `census`:
+
+```js
+import { zones, atlas, toSVG } from 'eulerchat';
+
+const map = atlas(zones(people, ['art', 'philosophy', 'music']));
+map.report.exact;        // no region drawn that nobody occupies, none lost
+map.report.disconnected; // subjects that ended up in more than one patch
+
+toSVG(map, { theme: 'dark', size: 1200 });
+```
+
+Both layouts report what they could not do. `layout(...).fit` carries
+`faithful`, `phantoms`, `worst` and a per-region breakdown; `atlas(...).report`
+carries `exact`, `wellFormed` and `worstSplit`. Neither is ever silently wrong.
+
+### Use the routing without the drawing
+
+The delivery rule is one pure predicate, and the census is a plain `Map`:
+
+```js
+import { receives, census, neighbourhood } from 'eulerchat';
+
+receives(['art', 'philosophy'], ['art']);              // true
+receives(['art'], ['art', 'philosophy']);              // false
+neighbourhood(census(people), ['art'], 3);             // what to show someone
+```
+
+### Mount the chat server in an app you already have
+
+```js
+import { createEulerChat, World, seed } from 'eulerchat/app';
+
+const chat = createEulerChat({
+  world: seed(new World()),   // or your own, built with addSubject/addUser/join
+  server: myHttpServer,       // attaches to yours; omit to get its own
+  serveClient: true,          // also serve the bundled UI
+});
+
+chat.world;  // live state — post(), recipientsOf(), diagramFor(), atlasFor()
+chat.close();
+```
+
+Importing this does not bind a port or read `process.argv`. The CLI
+(`npx eulerchat`) is a thin wrapper that adds those and a crash reporter.
+
+### Subpaths
+
+| import | what |
+|---|---|
+| `eulerchat` | everything below, re-exported |
+| `eulerchat/regions` | region algebra: `census`, `zones`, `receives`, `neighbourhood` |
+| `eulerchat/euler` | circle layout: `layout`, `lensArea`, `separation` |
+| `eulerchat/atlas` | routed layout: `atlas` |
+| `eulerchat/svg` | `toSVG` |
+| `eulerchat/app` | `createEulerChat` |
+| `eulerchat/store` | `World`, `seed` |
+
+
 ## The two decisions everything else follows from
 
 ### 1. Delivery is containment, not partition

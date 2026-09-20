@@ -6,11 +6,33 @@
   "type": "module",
   "main": "lib/index.js",
   "exports": {
-    ".": "./lib/index.js",
-    "./regions": "./lib/regions.js",
-    "./euler": "./lib/euler.js",
-    "./atlas": "./lib/atlas.js",
-    "./server": "./server/store.js"
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./regions": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/regions.js"
+    },
+    "./euler": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/euler.js"
+    },
+    "./atlas": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/atlas.js"
+    },
+    "./svg": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/svg.js"
+    },
+    "./palette": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/palette.js"
+    },
+    "./app": "./server/app.js",
+    "./store": "./server/store.js",
+    "./package.json": "./package.json"
   },
   "bin": {
     "eulerchat": "bin/eulerchat.js"
@@ -49,5 +71,7 @@
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
     "linkedom": "^0.18.13"
-  }
+  },
+  "types": "lib/index.d.ts",
+  "sideEffects": false
 }

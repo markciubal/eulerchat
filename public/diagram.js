@@ -1,4 +1,8 @@
 import { key, parse, receives } from '../lib/regions.js';
+import { blend, cssId, hue, regionFill, stroke } from '../lib/palette.js';
+
+// Re-exported so the browser modules have one import site for colour.
+export { blend, cssId, hue, regionFill, stroke };
 
 export const NS = 'http://www.w3.org/2000/svg';
 
@@ -36,34 +40,6 @@ export function scopeOf(roomKeys, selected) {
   return new Set(roomKeys.filter((k) => receives(parse(k), tags)));
 }
 
-/** Stable hue per subject, so a circle keeps its colour across reloads. */
-export function hue(subject) {
-  let h = 2166136261;
-  for (let i = 0; i < subject.length; i++) {
-    h ^= subject.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return Math.abs(h) % 360;
-}
-
-/** Circular mean, so an overlap is tinted by everything that forms it. */
-export function blend(subjects) {
-  let x = 0;
-  let y = 0;
-  for (const s of subjects) {
-    const a = (hue(s) * Math.PI) / 180;
-    x += Math.cos(a);
-    y += Math.sin(a);
-  }
-  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
-}
-
-export const stroke = (subject) => `hsl(${hue(subject)} 58% 47%)`;
-export const regionFill = (subjects) =>
-  `hsl(${blend(subjects)} ${48 + subjects.length * 9}% ${58 - subjects.length * 7}%)`;
-
-/** SVG ids have to survive subject names like "film noir". */
-export const cssId = (s) => s.replace(/[^a-z0-9]/gi, '_');
 
 /**
  * Draw the diagram into `svg`.
