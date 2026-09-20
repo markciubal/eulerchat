@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>circle</title>
+    <link rel="stylesheet" href="/public/styles.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <h1>circle</h1>
+      <p class="tagline">subjects overlap; the overlaps are rooms</p>
+      <label class="who">
+        you are
+        <input id="name" type="text" autocomplete="off" spellcheck="false" />
+      </label>
+    </header>
+
+    <main>
+      <section class="map" aria-label="subject diagram">
+        <div class="views" role="tablist">
+          <button id="view-map" type="button" class="view on" role="tab">map</button>
+          <button id="view-atlas" type="button" class="view" role="tab">atlas</button>
+          <label id="atlas-size" class="atlas-size" hidden>
+            subjects
+            <input type="range" id="subject-count" min="3" max="10" value="5" />
+            <output id="subject-count-out">5</output>
+          </label>
+        </div>
+        <svg id="diagram" role="img" aria-describedby="fit"></svg>
+        <p id="fit" class="fit"></p>
+        <p id="hidden" class="hidden-note" hidden></p>
+        <ul id="rooms" class="rooms" aria-label="rooms in view"></ul>
+      </section>
+
+      <section class="room" aria-label="room">
+        <div class="room-head">
+          <h2 id="room-title">pick a region</h2>
+          <p id="room-meta" class="meta"></p>
+        </div>
+
+        <ol id="log" class="log" aria-live="polite"></ol>
+
+        <form id="composer" class="composer">
+          <input
+            id="body"
+            type="text"
+            placeholder="click a region on the diagram first"
+            autocomplete="off"
+            disabled
+          />
+          <button id="send" type="submit" disabled>post</button>
+        </form>
+        <p id="notice" class="notice" hidden></p>
+      </section>
+    </main>
+
+    <aside class="rail">
+      <h2>interests</h2>
+      <form id="find" class="new-subject" role="search">
+        <input
+          id="subject-name"
+          type="search"
+          placeholder="search interests"
+          autocomplete="off"
+          spellcheck="false"
+          maxlength="31"
+          aria-label="search interests"
+        />
+        <button id="create" type="submit" title="create this interest">+</button>
+      </form>
+      <p id="rail-total" class="rail-total"></p>
+      <ul id="subjects" class="subjects"></ul>
+    </aside>
+
+    <script type="module" src="/public/app.js"></script>
+  </body>
+</html>

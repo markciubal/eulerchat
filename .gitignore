@@ -1,0 +1,7 @@
+node_modules/
+*.log
+*.tgz
+.DS_Store
+
+# Stray file from a notify hook that wrote to an unexpanded path string.
+*claude-notify-signals*

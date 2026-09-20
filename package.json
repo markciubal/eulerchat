@@ -1,0 +1,50 @@
+{
+  "name": "eulerchat",
+  "version": "0.1.0",
+  "description": "Chat rooms shaped like an Euler diagram: subjects overlap, the overlaps are rooms, and a coordinate is an address. Includes a standalone area-proportional Euler diagram layout engine.",
+  "author": "Mark Ciubal <mark.ciubal@gmail.com>",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./regions": "./lib/regions.js",
+    "./euler": "./lib/euler.js",
+    "./atlas": "./lib/atlas.js",
+    "./server": "./server/store.js"
+  },
+  "bin": {
+    "eulerchat": "bin/eulerchat.js"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "server",
+    "public",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "start:large": "node server/index.js --interests 1000 --people 4000",
+    "test": "node --test"
+  },
+  "keywords": [
+    "euler-diagram",
+    "venn-diagram",
+    "area-proportional",
+    "chat",
+    "set-visualization",
+    "layout",
+    "websocket"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "linkedom": "^0.18.13"
+  }
+}
