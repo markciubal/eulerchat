@@ -91,7 +91,11 @@ test('every subject is on the minimap', () => {
   const overview = world.overview();
 
   assert.equal(overview.subjects.length, world.index().population.size);
-  assert.ok(overview.subjects.length > 300);
+  assert.ok(overview.subjects.length > 300, `${overview.subjects.length} on the map`);
+  // The taxonomy places what it knows; the rest go on the unclassified ring
+  // rather than being dropped, which is the promise this makes.
+  assert.ok(overview.classified > 150);
+  assert.ok(overview.classified < overview.subjects.length);
   for (const s of overview.subjects) {
     assert.ok(Number.isFinite(s.x) && Number.isFinite(s.y), `${s.id} has no place`);
     assert.ok(s.n > 0);

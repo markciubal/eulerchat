@@ -19,6 +19,10 @@ test('a thousand interests builds, and most regions stay unoccupied', () => {
   // intersections from existing, applied to a circle rather than a lens.
   assert.ok(arity[1] <= 1000);
   assert.ok(arity[1] > 900, `${arity[1]} interests have anyone in them`);
+  // Most of the catalogue is past the taxonomy at this size, and those are
+  // unanchored on purpose — a real catalogue always has things no taxonomy
+  // has heard of.
+  assert.ok(world.overview().classified >= 200);
   assert.ok(arity[2] > 1000, `expected real pair density, got ${arity[2]}`);
 
   // A Venn build would carry 1000 + 499,500 pairs + ~166 million triples.

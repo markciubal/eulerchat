@@ -11,6 +11,7 @@
  */
 
 import { parse, reachableRooms } from '../lib/regions.js';
+import { knowledge } from '../lib/knowledge.js';
 
 /** Deterministic PRNG, so a benchmark run is comparable to the last one. */
 export function rng(seed = 1) {
@@ -24,33 +25,21 @@ export function rng(seed = 1) {
   };
 }
 
-const DOMAINS = [
-  'painting', 'sculpture', 'poetry', 'cinema', 'photography', 'architecture',
-  'jazz', 'opera', 'techno', 'folk music', 'guitar', 'piano',
-  'philosophy', 'ethics', 'logic', 'metaphysics', 'linguistics', 'history',
-  'archaeology', 'anthropology', 'cartography', 'astronomy', 'geology', 'botany',
-  'mycology', 'birding', 'entomology', 'marine biology', 'genetics', 'neuroscience',
-  'mathematics', 'topology', 'cryptography', 'compilers', 'databases', 'robotics',
-  'typography', 'ceramics', 'weaving', 'woodwork', 'blacksmithing', 'bookbinding',
-  'baking', 'fermentation', 'coffee', 'tea', 'cocktails', 'cheese',
-  'cycling', 'climbing', 'sailing', 'running', 'chess', 'go',
-];
-
-const FACETS = [
-  '', 'modern', 'early', 'history of', 'theory of', 'practical',
-  'amateur', 'field', 'digital', 'analogue', 'experimental', 'traditional',
-  'urban', 'rural', 'nordic', 'pacific', 'teaching', 'writing on',
-  'collecting', 'restoring',
-];
-
-/** Plausible, lowercase, and short enough for `World.addSubject`. */
-function* names() {
-  for (const facet of FACETS) {
-    for (const domain of DOMAINS) {
-      const name = facet ? `${facet} ${domain}` : domain;
-      if (name.length <= 31) yield name;
-    }
-  }
+/**
+ * The catalogue is the taxonomy: fields and the subfields under them, which
+ * are the real things people join. Inventing names by gluing a facet onto a
+ * domain — `modern painting`, `field painting`, `theory of painting` — made a
+ * catalogue that looked large and was mostly one subject wearing hats.
+ *
+ * Asked for more than the taxonomy holds, the rest are plainly numbered and
+ * go unanchored, which is honest: a real catalogue always has things no
+ * taxonomy has heard of, and they belong on the unclassified ring.
+ */
+function catalogueOf(wanted) {
+  const known = Object.keys(knowledge).filter((name) => knowledge[name] !== undefined);
+  const names = known.filter((name) => name !== 'knowledge');
+  for (let i = 1; names.length < wanted; i++) names.push(`topic ${i}`);
+  return names.slice(0, wanted);
 }
 
 /**
@@ -64,7 +53,7 @@ function* names() {
  */
 export function populate(world, options = {}) {
   const {
-    subjects = 1000,
+    subjects = 209,
     users = 4000,
     themeSize = 25,
     seed = 1,
@@ -75,25 +64,31 @@ export function populate(world, options = {}) {
   } = options;
 
   const random = rng(seed);
-  const catalogue = [];
+  const catalogue = catalogueOf(subjects).map((name) => world.addSubject(name));
 
-  for (const name of names()) {
-    if (catalogue.length >= subjects) break;
-    catalogue.push(world.addSubject(name));
-  }
-  // Past the word bank, fall back to numbered variants rather than silently
-  // building a smaller world than was asked for.
-  for (let i = 2; catalogue.length < subjects; i++) {
-    for (const base of names()) {
-      if (catalogue.length >= subjects) break;
-      const name = `${base} ${i}`;
-      if (name.length <= 31 && !world.subjects.has(name)) catalogue.push(world.addSubject(name));
+  // A theme is a field, and its members are the subfields beneath it — so the
+  // people who hold several things tend to hold several things from one
+  // corner of the map, which is what real interest graphs look like and what
+  // gives the overlaps anybody to put in them.
+  const byField = new Map();
+  const unclassified = [];
+  for (const subject of catalogue) {
+    const field = knowledge[subject];
+    if (!field) {
+      unclassified.push(subject);
+      continue;
     }
+    if (!byField.has(field)) byField.set(field, []);
+    byField.get(field).push(subject);
   }
 
-  const themes = [];
-  for (let i = 0; i < catalogue.length; i += themeSize) {
-    themes.push(catalogue.slice(i, i + themeSize));
+  const themes = [...byField.values()].filter((group) => group.length);
+  // Anything outside the taxonomy would otherwise form one enormous theme, and
+  // a Zipf-ish pick from a list of hundreds only ever reaches the first few —
+  // which left most of the catalogue with nobody in it at all. Chunked, they
+  // behave like the fields do.
+  for (let i = 0; i < unclassified.length; i += themeSize) {
+    themes.push(unclassified.slice(i, i + themeSize));
   }
 
   /** Zipf-ish pick: low indices are the theme's hubs. */

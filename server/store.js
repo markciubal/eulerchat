@@ -13,7 +13,7 @@ import {
 } from '../lib/regions.js';
 import { layout } from '../lib/euler.js';
 import { atlas } from '../lib/atlas.js';
-import { anchorsFor, radialLayout, resolve } from '../lib/taxonomy.js';
+import { anchorsFor, normalise, radialLayout, resolve } from '../lib/taxonomy.js';
 import { knowledge } from '../lib/knowledge.js';
 
 /** Computed once: where subjects sit before anybody has joined them. */
@@ -50,7 +50,10 @@ export class World {
   // --- catalogue & membership -------------------------------------------
 
   addSubject(name) {
-    const subject = String(name).trim().toLowerCase();
+    // `theory of entomology` and `modern entomology` are entomology. Splitting
+    // one small community into three rooms over a turn of phrase is the kind
+    // of fragmentation nobody would defend if asked directly.
+    const subject = normalise(name, this.hierarchy ?? HIERARCHY);
     if (!/^[a-z0-9][a-z0-9 -]{0,30}$/.test(subject)) throw new Error('unusable subject name');
     if (!this.subjects.has(subject) && this.subjects.size >= MAX_SUBJECTS) {
       throw new Error('the catalogue is full');

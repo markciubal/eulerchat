@@ -179,15 +179,15 @@ for (const n of [5, 8]) {
   const { atlas } = await import('../lib/atlas.js');
 
   const positions = radialLayout(knowledge);
-  const subjects = ['painting', 'philosophy', 'jazz', 'chess', 'botany'];
+  const subjects = ['entomology', 'mycology', 'topology', 'jazz', 'ethics'];
   const anchors = anchorsFor(subjects, positions);
 
   const people = (n, s) => Array.from({ length: n }, () => new Set(s));
   const crowd = [
-    ...people(20, ['painting']), ...people(16, ['philosophy']), ...people(14, ['jazz']),
-    ...people(12, ['chess']), ...people(10, ['botany']),
-    ...people(7, ['painting', 'philosophy']), ...people(5, ['jazz', 'painting']),
-    ...people(4, ['chess', 'botany']), ...people(3, ['philosophy', 'jazz']),
+    ...people(20, ['entomology']), ...people(16, ['mycology']), ...people(14, ['topology']),
+    ...people(12, ['jazz']), ...people(10, ['ethics']),
+    ...people(9, ['entomology', 'mycology']), ...people(5, ['topology', 'ethics']),
+    ...people(4, ['jazz', 'ethics']), ...people(3, ['entomology', 'topology']),
   ];
   const counts = zones(crowd, subjects);
 
@@ -254,7 +254,7 @@ function doc(node) {
 
 {
   const { renderMinimap } = await import('../public/minimap.js');
-  const wide = populate(new World(), { subjects: 600, users: 2500, chatter: 0 });
+  const wide = populate(new World(), { subjects: 209, users: 2500, chatter: 0 });
   const me = wide.addUser('me');
   const picked = [...wide.index().popular].slice(0, 3);
   for (const s of picked) wide.join(me, s);

@@ -437,6 +437,29 @@ const anchors = anchorsFor(subjects, where);
 atlas(zones(people, subjects), { anchors });
 ```
 
+The bundled hierarchy is three layers of academic fields of study: six or so
+divisions, the fields within them, and beneath those the subfields — and it is
+the subfields people join. Somebody joins `entomology`, not `biology`; the
+field above it is there to say where entomology *is*, so that it sits beside
+mycology and nowhere near topology before a single person has joined either.
+
+### A facet is not a different subject
+
+`theory of entomology`, `modern entomology` and `field entomology` are
+entomology. Three rooms for one small community is fragmentation nobody would
+defend if asked directly, so `addSubject` normalises:
+
+```js
+world.addSubject('theory of entomology');   // -> 'entomology'
+world.addSubject('history of jazz');        // -> 'jazz'
+world.addSubject('theory of everything');   // -> unchanged
+world.addSubject('field theory');           // -> unchanged
+```
+
+A facet is only stripped when what remains is a subject the hierarchy actually
+knows, and that restraint is the whole safety of it — a rule that stripped
+unconditionally would quietly rename things nobody meant to rename.
+
 Laid out radially — siblings adjacent, unrelated branches apart — and
 deterministic. Names it does not know are left unanchored and placed by
 co-membership as before; a facet like `modern jazz` resolves to `jazz`, so a
