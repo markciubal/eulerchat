@@ -1,6 +1,7 @@
 import { renderDiagram, regionAt, scopeOf, stroke, regionFill } from './diagram.js';
 import { renderAtlas, zoneAt, paintAtlas, relabel } from './atlasview.js';
 import { fitTo, pointsOf, renderMinimap } from './minimap.js';
+import { attachHelp, busyness, createCard, when } from './hints.js';
 
 const $ = (id) => document.getElementById(id);
 const svg = $('diagram');
@@ -164,6 +165,14 @@ function handleFrame(evt) {
   }
 }
 
+const card = createCard(document);
+attachHelp(document, { onOpen: (key, near) => card.explain(key, near) });
+
+// A click anywhere else puts an opened explanation away again.
+document.addEventListener('click', (evt) => {
+  if (card.pinned && !card.element.contains(evt.target)) card.hide(true);
+});
+
 connect();
 
 function notify(text) {
@@ -189,17 +198,31 @@ function draw() {
 
   // The diagram says how far it can be trusted. With three circles some error
   // is unavoidable, so name it rather than imply the areas are exact.
+  // Lead with what is here, not with how well it was drawn. The accuracy of
+  // the drawing was the only explanation on the page, it worried people, and
+  // there is nothing they can do about it — it lives behind the (i) now.
+  const rooms = state.diagram.rooms ?? [];
+  const mine = rooms.filter((r) => r.member).length;
+  const people = state.diagram.circles?.[0]?.population ?? 0;
+  const summary =
+    `${rooms.length} ${rooms.length === 1 ? 'conversation' : 'conversations'} here` +
+    (mine ? ` · you are in ${mine}` : people ? ' · join an interest to take part' : '');
+
   const worst = fit.worst;
   const ghost = fit.phantoms?.[0];
-  $('fit').textContent = !fit.drawable
-    ? 'more than three circles — this picture cannot be accurate.'
+  $('fit').textContent = summary;
+  $('fit').classList.remove('flag');
+  $('fit-note').textContent = !fit.drawable
+    ? 'Showing more than three at once, so the sizes here are approximate.'
     : ghost
-      ? // Worse than a mis-sized room: somewhere to go that is not there.
-        `where these three meet is drawn but empty — no one holds all of ${ghost.subjects.join(', ')}`
+      ? // Worse than a mis-sized room: somewhere to go that is not there. Said
+        // as a fact about people, because that is what it is, and counting the
+        // subjects rather than assuming three — it said "these three" over a
+        // list of two.
+        `nobody here is interested in ${ghost.subjects.join(' and ')} together, so that middle patch is empty`
       : fit.faithful || !worst
-        ? 'every region drawn to scale'
-        : `areas to scale · ${worst.key} drawn ${worst.drawn > worst.population ? 'large' : 'small'} by ${(worst.error * 100).toFixed(0)}%`;
-  $('fit').classList.toggle('flag', !fit.drawable || !fit.faithful);
+        ? ''
+        : 'Sizes here are within a few per cent.';
 
   const note = $('hidden');
   note.hidden = !hidden?.length;
@@ -272,6 +295,10 @@ function renderRooms() {
     count.textContent = String(room.population);
 
     button.append(dot, name, count);
+    button.addEventListener('pointerenter', () => card.room(room, button));
+    button.addEventListener('pointerleave', () => card.hide());
+    button.addEventListener('focus', () => card.room(room, button));
+    button.addEventListener('blur', () => card.hide());
 
     const waiting = state.unread[room.key] ?? 0;
     if (waiting) {
@@ -326,6 +353,7 @@ function drawAtlas() {
   paintAtlas(state.territories, state.selected);
   renderRooms();
   drawMinimap();
+  $('lede').hidden = (state.diagram?.subscription?.length ?? 0) > 0;
 
   const { report, subjects, zones } = view;
   const split = report.disconnected.length;
@@ -439,6 +467,7 @@ function showView(which) {
   $('view-map').classList.toggle('on', which === 'map');
   $('view-atlas').classList.toggle('on', which === 'atlas');
   $('atlas-size').hidden = which !== 'atlas';
+  $('refit').hidden = which !== 'atlas';
   svg.classList.toggle('atlas-mode', which === 'atlas');
 
   if (which === 'atlas') {
@@ -494,16 +523,23 @@ const repaint = () =>
     : paintSelection();
 
 svg.addEventListener('pointermove', (evt) => {
-  if (state.view === 'atlas') return; // territories are lit by selection only
   const at = hit(evt);
   if (at !== state.hovered) {
     state.hovered = at;
-    paintSelection();
+    if (state.view !== 'atlas') paintSelection();
+
+    // Hovering a patch of the picture asks the same question a chip does.
+    const room = currentRooms().find((r) => r.key === at);
+    if (room) card.room(room, { getBoundingClientRect: () => ({
+      left: evt.clientX, bottom: evt.clientY + 12, right: evt.clientX, top: evt.clientY,
+    }) });
+    else card.hide();
   }
 });
 
 svg.addEventListener('pointerleave', () => {
   state.hovered = null;
+  card.hide();
   repaint();
 });
 
@@ -537,34 +573,55 @@ function renderRoom() {
   log.textContent = '';
 
   if (!room) {
-    $('room-title').textContent = 'pick a region';
-    $('room-meta').textContent = 'click anywhere inside a circle on the diagram.';
+    $('room-title').textContent = 'Pick a conversation';
+    $('room-meta').textContent =
+      'Click inside a circle above, or one of the buttons under it. Where circles overlap ' +
+      'is a conversation for people interested in both.';
     body.disabled = true;
     $('send').disabled = true;
     body.placeholder = 'click a region on the diagram first';
     return;
   }
 
-  $('room-title').textContent = room.subjects.join(' ∩ ');
+  $('room-title').textContent = room.subjects.join(' and ');
 
   const people = `${room.population} ${room.population === 1 ? 'person' : 'people'}`;
+  const stats = room.stats;
+  const activity = stats?.last ? ` · ${busyness(stats)}, last ${when(stats.last.at)}` : '';
   $('room-meta').textContent = room.member
-    ? `${people} · you are here`
-    : `${people} · join ${room.subjects.join(' and ')} to take part`;
+    ? `${people} · you are here${activity}`
+    : `${people} · join ${room.subjects.join(' and ')} to take part${activity}`;
 
   body.disabled = !room.member;
   $('send').disabled = !room.member;
   body.placeholder = room.member
-    ? `post to ${room.subjects.join(' ∩ ')}`
-    : 'you are not in every subject of this region';
+    ? `say something to the ${room.population} people here`
+    : `join ${room.subjects.join(' and ')} to join in`;
+  const help = $('composer-help');
+  help.textContent = '';
+  if (!room.member) {
+    // The remedy belongs where the problem is described. Telling somebody to
+    // go and find a button in another column is how you lose them.
+    help.append(document.createTextNode('To join in, you need '));
+    const missing = room.subjects.filter((s) => !(state.diagram?.subscription ?? []).includes(s));
+    missing.forEach((subject, i) => {
+      const join = document.createElement('button');
+      join.type = 'button';
+      join.className = 'join-here';
+      join.textContent = `join ${subject}`;
+      join.addEventListener('click', () => send({ type: 'join', subject }));
+      help.append(join);
+      if (i < missing.length - 1) help.append(document.createTextNode(' and '));
+    });
+  }
 
   const messages = state.history[room.key] ?? [];
   if (!messages.length) {
     const empty = document.createElement('li');
     empty.className = 'empty';
     empty.textContent = room.member
-      ? 'nothing here yet. you could be first.'
-      : 'nothing visible from outside.';
+      ? 'Nothing said here yet. You could be the first.'
+      : 'You will be able to read this once you have joined.';
     log.append(empty);
     return;
   }
@@ -707,10 +764,30 @@ $('subject-name').addEventListener('input', (evt) => {
 });
 
 $('find').addEventListener('submit', (evt) => {
+  // Enter searches. It used to create: somebody typing the name of a group
+  // they had been told about would silently make a second, empty one beside
+  // it, find nobody in it, and conclude the place was dead — without ever
+  // knowing they had done it.
   evt.preventDefault();
+  const query = $('subject-name').value.trim();
+  if (query) send({ type: 'search', query });
+});
+
+$('create').addEventListener('click', () => {
   const input = $('subject-name');
-  if (!input.value.trim()) return;
-  send({ type: 'createSubject', name: input.value });
+  const name = input.value.trim();
+  if (!name) return;
+
+  // Never quietly make a second one. If it already exists, that is what they
+  // were looking for.
+  const existing = state.results?.subjects?.find((s) => s.id === name.toLowerCase());
+  if (existing) {
+    notify(`"${existing.id}" already exists with ${existing.population} people — joining that one.`);
+    send({ type: 'join', subject: existing.id });
+  } else {
+    send({ type: 'createSubject', name });
+    notify(`Created "${name}" and joined you to it.`);
+  }
   input.value = '';
   state.results = null;
 });
@@ -721,6 +798,7 @@ $('funnel').addEventListener('change', (evt) => {
 
 $('name').addEventListener('change', (evt) => {
   send({ type: 'identify', name: evt.target.value });
+  notify(`Saved. Others will see your messages signed "${evt.target.value}".`);
 });
 
 // --- desktop alerts --------------------------------------------------------
@@ -737,9 +815,9 @@ function paintBell() {
   }
   const on = Notification.permission === 'granted';
   bell.classList.toggle('on', on);
-  bell.textContent = on ? 'alerts on' : 'alerts off';
+  bell.textContent = on ? 'alerts are on' : 'turn on alerts';
   bell.disabled = Notification.permission === 'denied';
-  if (bell.disabled) bell.textContent = 'alerts blocked';
+  if (bell.disabled) bell.textContent = 'alerts blocked by your browser';
 }
 
 $('bell').addEventListener('click', async () => {

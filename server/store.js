@@ -378,6 +378,7 @@ export class World {
           population,
           member: receives(held, tags),
           messages: (this.messages.get(roomKey) ?? []).length,
+          stats: this.stats(roomKey),
         };
       })
       .sort((a, b) => a.subjects.length - b.subjects.length || a.key.localeCompare(b.key));
@@ -449,6 +450,7 @@ export class World {
         population: counts.get(zone.key) ?? zone.population,
         member: receives(held, zone.subjects),
         messages: (this.messages.get(zone.key) ?? []).length,
+        stats: this.stats(zone.key),
       })),
     };
   }
@@ -504,6 +506,33 @@ export class World {
     const value = { subjects: placed, extent: EXTENT, classified: placed.length - strays.length };
     this._overview = { census: counts, size: counts.size, value };
     return value;
+  }
+
+  /**
+   * How busy a room is, and what was said in it last.
+   *
+   * A population on its own does not tell anybody whether it is worth walking
+   * into: forty people who last spoke in March is a different room from four
+   * who are talking now. Counted from the tail of the log, so the cost is the
+   * length of the recent window rather than the length of the history.
+   */
+  stats(roomKey, window = 5 * 60_000) {
+    const log = this.messages.get(roomKey);
+    if (!log?.length) return { messages: 0, perMinute: 0, last: null };
+
+    const since = now() - window;
+    let recent = 0;
+    for (let i = log.length - 1; i >= 0; i--) {
+      if (log[i].at < since) break;
+      recent++;
+    }
+
+    const latest = log[log.length - 1];
+    return {
+      messages: log.length,
+      perMinute: Number((recent / (window / 60_000)).toFixed(2)),
+      last: { author: latest.author, body: latest.body.slice(0, 120), at: latest.at },
+    };
   }
 
   /**

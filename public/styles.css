@@ -614,3 +614,140 @@ input:disabled {
 #diagram.atlas-mode:active {
   cursor: grabbing;
 }
+
+/* --- guidance --- */
+
+.info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 5px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  font-style: italic;
+  line-height: 1;
+  vertical-align: middle;
+  cursor: help;
+}
+
+.info:hover,
+.info:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+}
+
+.rooms-head,
+.composer-help {
+  margin: 10px 2px 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.composer-help {
+  margin: 0;
+  padding: 0 14px 10px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+}
+
+.card {
+  position: fixed;
+  z-index: 40;
+  width: 280px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.14);
+  font-size: 13px;
+  line-height: 1.45;
+  pointer-events: auto;
+}
+
+.card strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.card p {
+  margin: 0 0 6px;
+  color: var(--muted);
+}
+
+.card p:last-child {
+  margin-bottom: 0;
+}
+
+.card .last {
+  padding: 6px 8px;
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+.card .last strong {
+  display: inline;
+  margin: 0;
+}
+
+.card .ago {
+  font-size: 11px;
+}
+
+.card .more {
+  padding: 3px 9px;
+  font-size: 12px;
+  border-radius: 999px;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.lede {
+  margin: 0 2px 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.fit-note {
+  margin: 2px 4px 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.join-here {
+  margin: 0 3px;
+  padding: 2px 9px;
+  font-size: 12px;
+  border-radius: 999px;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* The minimap promised something by turning the cursor into a hand, and then
+   did nothing when clicked, which reads as broken rather than as unfinished. */
+#minimap {
+  cursor: default;
+}
+
+/* A question-mark cursor over the overlap labels said "this is an
+   explanation" when in fact clicking there is how you open the conversation. */
+.zone-label text {
+  cursor: pointer;
+}

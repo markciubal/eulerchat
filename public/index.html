@@ -9,7 +9,8 @@
   <body>
     <header class="bar">
       <h1>eulerchat</h1>
-      <p class="tagline">subjects overlap; the overlaps are rooms</p>
+      <p class="tagline">pick what you are interested in — where your interests overlap, so do the conversations</p>
+      <span class="bell-wrap" data-help="alerts"></span>
       <button id="bell" type="button" class="bell" title="desktop alerts for mentions and small rooms">
         alerts off
       </button>
@@ -22,23 +23,27 @@
     <main>
       <section class="map" aria-label="subject diagram">
         <div class="views" role="tablist">
-          <button id="view-map" type="button" class="view on" role="tab">map</button>
-          <button id="view-atlas" type="button" class="view" role="tab">atlas</button>
-          <button id="refit" type="button" class="view" title="frame my interests again">fit</button>
+          <span class="tab" data-help="map"><button id="view-map" type="button" class="view on" role="tab">map</button></span>
+          <span class="tab" data-help="atlas"><button id="view-atlas" type="button" class="view" role="tab">atlas</button></span>
+          <button id="refit" type="button" class="view" title="show my interests again" hidden>back to my interests</button>
           <output id="zoom-note" class="zoom-note"></output>
           <label id="atlas-size" class="atlas-size" hidden>
-            subjects
+            <span data-help="subjects">subjects</span>
             <input type="range" id="subject-count" min="3" max="10" value="5" />
             <output id="subject-count-out">5</output>
           </label>
         </div>
+        <p id="lede" class="lede">Pick what you are interested in, on the right. Where your interests
+          overlap with other people’s, there is a conversation — click inside a circle to read it.</p>
         <svg id="diagram" role="img" aria-describedby="fit"></svg>
         <p id="fit" class="fit"></p>
+        <p id="fit-note" class="fit-note" data-help="fit"></p>
         <p id="hidden" class="hidden-note" hidden></p>
+        <p class="rooms-head" data-help="rooms">conversations here</p>
         <ul id="rooms" class="rooms" aria-label="rooms in view"></ul>
         <figure id="minimap-wrap" class="minimap" hidden>
           <svg id="minimap" role="img" aria-label="every subject, and where yours are"></svg>
-          <figcaption id="minimap-note"></figcaption>
+          <figcaption id="minimap-note" data-help="minimap"></figcaption>
         </figure>
       </section>
 
@@ -61,13 +66,14 @@
           <button id="send" type="submit" disabled>post</button>
         </form>
         <p id="notice" class="notice" hidden></p>
+        <p id="composer-help" class="composer-help" data-help="composer"></p>
       </section>
     </main>
 
     <aside class="rail">
-      <h2>interests</h2>
+      <h2 data-help="interests">your interests</h2>
       <label class="funnel">
-        joining also adds
+        <span data-help="funnel">joining also adds</span>
         <select id="funnel">
           <option value="0">nothing broader</option>
           <option value="1">the field it is in</option>
