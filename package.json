@@ -58,6 +58,18 @@
     "./abbrev": {
       "types": "./lib/index.d.ts",
       "default": "./lib/abbrev.js"
+    },
+    "./adapt": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/adapt.js"
+    },
+    "./embed": {
+      "types": "./embed/embed.d.ts",
+      "default": "./embed/mount.js"
+    },
+    "./react": {
+      "types": "./embed/embed.d.ts",
+      "default": "./embed/react.js"
     }
   },
   "bin": {
@@ -71,7 +83,8 @@
     "README.md",
     "LICENSE",
     "tools",
-    "examples"
+    "examples",
+    "embed"
   ],
   "engines": {
     "node": ">=20"
@@ -89,7 +102,10 @@
     "chat",
     "set-visualization",
     "layout",
-    "websocket"
+    "websocket",
+    "react",
+    "embed",
+    "community-discovery"
   ],
   "license": "MIT",
   "dependencies": {
@@ -98,15 +114,21 @@
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
-    "linkedom": "^0.18.13"
+    "linkedom": "^0.18.13",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   },
   "types": "lib/index.d.ts",
   "sideEffects": false,
   "peerDependencies": {
-    "@types/node": "*"
+    "@types/node": "*",
+    "react": ">=18"
   },
   "peerDependenciesMeta": {
     "@types/node": {
+      "optional": true
+    },
+    "react": {
       "optional": true
     }
   }

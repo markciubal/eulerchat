@@ -206,6 +206,9 @@ rooms over your own transport, and building an atlas.
 | `eulerchat/mold` | `Mold`, `weave` — what grows between them |
 | `eulerchat/abbrev` | `shortLabels`, `abbreviate` — naming the overlaps |
 | `eulerchat/knowledge` | the bundled hierarchy, and `subfields()` |
+| `eulerchat/adapt` | `fromRows` — read the tables you already have |
+| `eulerchat/embed` | `mountMap`, `viewFor` — the map in an element you own |
+| `eulerchat/react` | `<EulerMap />` |
 | `eulerchat/app` | `createEulerChat` |
 | `eulerchat/store` | `World`, `seed` |
 
@@ -419,6 +422,70 @@ public/app.js     state and wiring
 
 `lib/` is served to the browser as well as imported by the server, so the
 client and server share one definition of what a region address is.
+
+## Embedding it: point at your data
+
+The chat server is one way in and not the interesting one for most callers. If
+you already know who your people are and what they are interested in — a users
+table, a join table, a GraphQL response — you can have the map without a
+connection, a poll or an adapter layer.
+
+```jsx
+import { EulerMap } from 'eulerchat/react';
+
+<EulerMap
+  users={db.users}              // [{ id, username, novelty }]
+  interests={db.userInterests}  // [{ user_id, interest }]
+  focus={currentUser.id}
+  onSelectRoom={(room) => open(room.key)}
+/>
+```
+
+That is the whole integration. Column names are guessed (`id`/`user_id`,
+`username`/`name`/`handle`, `interest`/`subject`/`tag`), and named when they
+cannot be:
+
+```jsx
+<EulerMap users={rows} columns={{ id: 'uuid', name: 'profile.displayName', subjects: 'tags' }} />
+```
+
+Interests may hang off the person as an array or a comma-separated column
+instead of living in their own table. Subject names are normalised on the way
+in, so `theory of entomology` and `modern entomology` do not become two rooms.
+
+React is an **optional** peer dependency. Nothing else in the package imports
+it, and `mountMap(element, options)` is the same thing without a framework:
+
+```js
+import { mountMap } from 'eulerchat/embed';
+const map = mountMap(element, { users, interests, focus: userId });
+map.update({ view: 'atlas' });
+map.destroy();
+```
+
+Or `viewFor(data, { focus })` for the numbers with nothing drawn.
+
+### Steering what people are shown
+
+A `novelty` column decides which way somebody gets pushed when the map
+suggests a subject they do not hold. At 0 it offers the nearest neighbour —
+the subject most of their people already share, which is the one they were
+most likely to find unaided. At 1 it prefers a subject reachable *through*
+people but far away in the hierarchy, which is what a new community looks like
+from the inside.
+
+Stored as a fraction or a percentage, either is read. Left out entirely,
+people get the middle rather than an extreme.
+
+```
+entomologist, novelty 0.0  ->  mycology   (same field, strongest overlap)
+entomologist, novelty 1.0  ->  poetry     (different division, but bridged)
+```
+
+The crossover is around 0.53 for that pair: reaching across the map has to be
+worth more than a strong neighbour before it wins, which is the behaviour you
+want from a dial rather than a switch.
+
 
 ## Where subjects sit, and what grows between them
 
