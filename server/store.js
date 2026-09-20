@@ -31,6 +31,16 @@ export const MAX_SUBSCRIPTIONS = 32;
 /** Bounds the catalogue, which is otherwise unbounded memory; see `addSubject`. */
 export const MAX_SUBJECTS = 50_000;
 
+/**
+ * How long the server keeps anything. After this it forgets.
+ *
+ * Worth being exact about what that is and is not: it deletes the server's
+ * copy. Everyone who was in the room was handed the words and can keep them
+ * for as long as they like, and nothing here can tell whether they have. This
+ * limits what a server breach yields, not what a person remembers.
+ */
+export const KEEP_FOR = 12 * 60 * 60 * 1000;
+
 /** Region populations, canonically ordered — identical censuses, identical string. */
 const censusSignature = (counts) =>
   [...counts]
@@ -573,13 +583,54 @@ export class World {
 
   // --- messages ----------------------------------------------------------
 
-  post(userId, tags, body) {
+  /**
+   * Forget everything older than the retention window.
+   *
+   * By looking at every message rather than assuming the old ones are a
+   * prefix. Logs are appended to and timestamps are monotonic, so in practice
+   * they are in order — but "in practice" is a poor thing for a promise about
+   * deletion to rest on, and a single message out of order would have left
+   * everything before it sitting there for good. Filtering costs the same.
+   */
+  forgetOld(now = Date.now()) {
+    const cutoff = now - KEEP_FOR;
+    let dropped = 0;
+
+    for (const [roomKey, log] of this.messages) {
+      const keep = log.filter((message) => message.at >= cutoff);
+      if (keep.length === log.length) continue;
+
+      dropped += log.length - keep.length;
+      if (keep.length) this.messages.set(roomKey, keep);
+      else this.messages.delete(roomKey);
+    }
+    return dropped;
+  }
+
+  /**
+   * Whether somebody wants their own client to keep a transcript.
+   *
+   * Their setting, about their own copy. It is not a request anybody else is
+   * bound by, and the interface says so rather than implying otherwise.
+   */
+  setRecording(userId, on) {
+    const profile = this.profiles.get(userId);
+    if (!profile) return false;
+    profile.recording = Boolean(on);
+    return profile.recording;
+  }
+
+  recording(userId) {
+    return Boolean(this.profiles.get(userId)?.recording);
+  }
+
+  post(userId, tags, body, options = {}) {
     const room = canonical(tags);
     const text = String(body ?? '').trim();
 
     if (!room.length) throw new Error('a message needs at least one subject');
     if (room.length > MAX_ARITY) throw new Error(`at most ${MAX_ARITY} subjects per room`);
-    if (!text) throw new Error('empty message');
+    if (!text && !options.envelope) throw new Error('empty message');
     for (const s of room) if (!this.subjects.has(s)) throw new Error(`no such subject: ${s}`);
 
     // You may only post where you stand. Posting into a room you are not in
@@ -598,6 +649,16 @@ export class World {
       body: text.slice(0, 2000),
       at: now(),
     };
+
+    // A sealed message travels and is stored as an envelope. The server holds
+    // it, routes it and forgets it on schedule, and at no point can open it —
+    // which also means it cannot see a name in it, so a sealed message can
+    // notify a room but never a mention.
+    if (options.envelope) {
+      message.envelope = options.envelope;
+      message.sealed = true;
+      message.body = '';
+    }
 
     const log = this.messages.get(roomKey) ?? [];
     log.push(message);

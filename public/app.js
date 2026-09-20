@@ -2,6 +2,7 @@ import { stroke, regionFill } from './diagram.js';
 import { renderAtlas, zoneAt, paintAtlas, relabel } from './atlasview.js';
 import { fitTo, pointsOf, renderMinimap } from './minimap.js';
 import { attachHelp, busyness, createCard, when } from './hints.js';
+import { available, identity, seal, unseal } from '../lib/seal.js';
 
 const $ = (id) => document.getElementById(id);
 const svg = $('diagram');
@@ -18,6 +19,11 @@ const state = {
   atlas: null,
   territories: new Map(),
   atlasSize: 5,
+  me: null,
+  keys: new Map(),
+  sealing: false,
+  recording: false,
+  kept: [],
   written: [],
   viewBox: null,
   overview: null,
@@ -43,8 +49,12 @@ function connect() {
   const at = (location.pathname ?? '/').replace(/\/$/, '') || '/';
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${at}`);
 
-  ws.addEventListener('open', () => {
+  ws.addEventListener('open', async () => {
     backoff = 500;
+    if (available() && !state.identity) {
+      state.identity = await identity();
+      send({ type: 'keys', keyId: state.identity.id, publicKey: state.identity.publicKey });
+    }
     notify('');
     const previous = remembered();
     if (previous) send({ type: 'resume', userId: previous });
@@ -114,6 +124,23 @@ function handleFrame(evt) {
       const log = (state.history[msg.message.room] ??= []);
       log.push(msg.message);
       if (msg.message.room === state.selected) renderRoom();
+
+      // A sealed message arrives unreadable and is opened here, never on the
+      // server, which has no key to open it with.
+      if (msg.message.envelope && state.identity) {
+        unseal(msg.message.envelope, state.identity)
+          .then((text) => {
+            if (text === null) return;
+            msg.message.body = text;
+            keep(msg.message);
+            if (msg.message.room === state.selected) renderRoom();
+          })
+          .catch(() => {
+            msg.message.body = '[could not be unlocked]';
+          });
+      } else {
+        keep(msg.message);
+      }
       break;
     }
 
@@ -154,6 +181,19 @@ function handleFrame(evt) {
         state.results = msg;
         renderRail();
       }
+      break;
+
+    case 'key':
+      if (msg.keyId && msg.publicKey) state.keys.set(msg.keyId, msg.publicKey);
+      break;
+
+    case 'readers':
+      state.readers = msg.readers ?? [];
+      break;
+
+    case 'recording':
+      state.recording = msg.on;
+      $('recording').checked = msg.on;
       break;
 
     case 'error':
@@ -561,6 +601,12 @@ function renderRoom() {
     text.textContent = m.body;
 
     head.append(who, at);
+    if (m.sealed) {
+      const mark = document.createElement('span');
+      mark.className = 'sealed-mark';
+      mark.textContent = '🔒 encrypted';
+      head.append(mark);
+    }
     li.append(head, text);
     log.append(li);
   }
@@ -573,8 +619,62 @@ $('composer').addEventListener('submit', (evt) => {
   const body = $('body');
   if (!room || !body.value.trim()) return;
 
-  send({ type: 'post', tags: room.subjects, body: body.value });
+  const text = body.value;
   body.value = '';
+
+  if (!state.sealing || !state.identity) {
+    send({ type: 'post', tags: room.subjects, body: text });
+    return;
+  }
+
+  // Sealed to whoever is in the room right now. Anyone who arrives later
+  // cannot read it, which is what a key used once and thrown away means.
+  send({ type: 'readers', room: room.key });
+  setTimeout(async () => {
+    const readers = (state.readers ?? []).map((r) => r.publicKey).filter(Boolean);
+    if (!readers.length) {
+      notify('Nobody is here to receive it — sent unlocked instead.');
+      send({ type: 'post', tags: room.subjects, body: text });
+      return;
+    }
+    const envelope = await seal(text, state.identity, readers);
+    send({ type: 'post', tags: room.subjects, body: '', envelope });
+  }, 120);
+});
+
+/** Their own copy, if they asked for one. Nobody else's. */
+function keep(message) {
+  if (!state.recording) return;
+  state.kept.push({ room: message.room, author: message.author, body: message.body, at: message.at });
+  try {
+    localStorage.setItem('eulerchat.kept', JSON.stringify(state.kept.slice(-500)));
+  } catch {
+    /* no room, or a private window: the copy is a convenience */
+  }
+}
+
+$('sealed').addEventListener('change', (evt) => {
+  if (evt.target.checked && !available()) {
+    evt.target.checked = false;
+    notify('This browser cannot encrypt; messages would go unlocked.');
+    return;
+  }
+  state.sealing = evt.target.checked;
+  notify(
+    state.sealing
+      ? 'Locked before sending. The people here can still keep a copy.'
+      : 'Messages will go unlocked.',
+  );
+});
+
+$('recording').addEventListener('change', (evt) => {
+  state.recording = evt.target.checked;
+  send({ type: 'record', on: state.recording });
+  notify(
+    state.recording
+      ? 'Keeping your own copy in this browser. The server still forgets after 12 hours.'
+      : 'Not keeping a copy.',
+  );
 });
 
 // --- rail -----------------------------------------------------------------

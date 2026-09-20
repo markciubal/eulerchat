@@ -24,6 +24,7 @@ import { World, seed } from './store.js';
 import { populate } from './populate.js';
 import { Sessions } from './sessions.js';
 import { Notifications } from './notifications.js';
+import { parse } from '../lib/regions.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(here, '..', 'public');
@@ -190,6 +191,24 @@ export function createEulerChat(options = {}) {
   };
 
   /**
+   * The server forgets on a schedule rather than on request, so that
+   * forgetting does not depend on anybody remembering to ask for it.
+   *
+   * Unreferenced: a pending sweep is not work worth keeping a process alive
+   * for. While the server is listening the loop stays awake anyway, and once
+   * it is not, this should not be the thing holding the door open.
+   */
+  const SWEEP_MS = 10 * 60 * 1000;
+  const sweeper = setInterval(() => {
+    const dropped = world.forgetOld();
+    if (dropped) {
+      console.log(`eulerchat: forgot ${dropped} message${dropped === 1 ? '' : 's'} past their twelve hours`);
+    }
+  }, SWEEP_MS);
+  sweeper.unref?.();
+  wss.on('close', () => clearInterval(sweeper));
+
+  /**
    * Platform routers close a connection that carries no data for a while —
    * Heroku's cuts off at 55 seconds — and a quiet room carries none. Without
    * this, someone reading rather than typing is disconnected on a timer.
@@ -214,6 +233,7 @@ export function createEulerChat(options = {}) {
       }
     }
   }, HEARTBEAT_MS);
+  heartbeat.unref?.();
   wss.on('close', () => clearInterval(heartbeat));
 
   /**
@@ -224,6 +244,11 @@ export function createEulerChat(options = {}) {
    */
   const GRACE_MS = 60_000;
   const orphans = new Map();
+  // Closing clears the grace timers, but sockets close asynchronously, so one
+  // going down as the server comes down would otherwise arm a fresh minute
+  // after the clearing had already happened — and a host that called close()
+  // would sit there waiting on it.
+  let closed = false;
 
   /** Whatever happened while they were away, on the way in. */
   const sendBacklog = (socket, userId) => {
@@ -275,7 +300,7 @@ export function createEulerChat(options = {}) {
       bucket.tokens -= cost;
       return true;
     };
-    const PRICE = { createSubject: 10, atlas: 8, overview: 6, post: 2, search: 1, join: 1, leave: 1, funnel: 2 };
+    const PRICE = { createSubject: 10, atlas: 8, overview: 6, post: 2, search: 1, join: 1, leave: 1, funnel: 2, keys: 3, readers: 2, record: 1 };
 
     socket.on('message', (raw) => {
       let msg;
@@ -333,6 +358,27 @@ export function createEulerChat(options = {}) {
             break;
           }
 
+          case 'keys': {
+            // A public key, so others can seal to this person. The server
+            // relays these and holds no private key of anybody's — but it does
+            // decide whose keys go in the list, which is the limit of what
+            // this protects against and is said plainly in the interface.
+            session.publicKey = msg.publicKey ?? null;
+            session.keyId = String(msg.keyId ?? '');
+            for (const other of sessions) {
+              if (other === session) continue;
+              send(other.socket, { type: 'key', keyId: session.keyId, publicKey: session.publicKey });
+              send(session.socket, { type: 'key', keyId: other.keyId, publicKey: other.publicKey });
+            }
+            break;
+          }
+
+          case 'record': {
+            world.setRecording(userId, msg.on);
+            send(socket, { type: 'recording', on: world.recording(userId) });
+            break;
+          }
+
           case 'funnel': {
             // How far a join should carry from now on. Existing memberships
             // are left alone — widening is something you choose to do next,
@@ -348,6 +394,18 @@ export function createEulerChat(options = {}) {
             // and cached client-side; it only changes when a subject gains or
             // loses its first member.
             send(socket, { type: 'overview', ...world.overview() });
+            break;
+          }
+
+          case 'readers': {
+            // Who is present in a room, and their public keys, so a sender can
+            // wrap a message key for each of them.
+            const room = parse(String(msg.room ?? ''));
+            const here = sessions
+              .reaching(world.audienceFor(room, sessions.present()))
+              .filter((s) => s.publicKey)
+              .map((s) => ({ keyId: s.keyId, publicKey: s.publicKey }));
+            send(socket, { type: 'readers', room: msg.room, readers: here });
             break;
           }
 
@@ -390,7 +448,9 @@ export function createEulerChat(options = {}) {
           }
 
           case 'post': {
-            const message = world.post(userId, msg.tags ?? [], msg.body);
+            const message = world.post(userId, msg.tags ?? [], msg.body, {
+              envelope: msg.envelope ?? null,
+            });
             // Only people with a connection open can be sent anything, so the
             // audience search is narrowed to them rather than to every member.
             const audience = world.audienceFor(message.subjects, sessions.present());
@@ -410,16 +470,17 @@ export function createEulerChat(options = {}) {
 
     socket.on('close', () => {
       sessions.close(sessionId);
+      if (closed) return; // shutting down; nobody is coming back to reclaim it
 
       const leaving = userId;
-      orphans.set(
-        leaving,
-        setTimeout(() => {
-          orphans.delete(leaving);
-          world.removeUser(leaving);
-          pushDiagrams();
-        }, GRACE_MS),
-      );
+      const timer = setTimeout(() => {
+        orphans.delete(leaving);
+        world.removeUser(leaving);
+        pushDiagrams();
+      }, GRACE_MS);
+      // Somebody's minute of grace is not a reason to keep a process running.
+      timer.unref?.();
+      orphans.set(leaving, timer);
       pushDiagrams();
     });
   });
@@ -433,7 +494,9 @@ export function createEulerChat(options = {}) {
     server,
     wss,
     close() {
+      closed = true;
       notifications.close();
+      clearInterval(sweeper);
       clearInterval(heartbeat);
       for (const pending of orphans.values()) clearTimeout(pending);
       orphans.clear();

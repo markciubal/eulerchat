@@ -374,3 +374,44 @@ export function shortLabels(subjects: Iterable<string>): Map<string, string>;
 
 /** `mu + p + ma` — how an overlap is written on the map. */
 export function abbreviate(subjects: string[], labels: Map<string, string>): string;
+
+// --- sealing ---------------------------------------------------------------
+
+/** Somebody's keys for one session. The private half never leaves this object. */
+export interface Identity {
+  pair: CryptoKeyPair;
+  publicKey: JsonWebKey;
+  /** A short, stable name for the public key, used to address a wrapped key. */
+  id: string;
+}
+
+/** What a server is given: a ciphertext and wrapped keys it cannot open. */
+export interface Envelope {
+  sealed: true;
+  from: JsonWebKey;
+  iv: string;
+  body: string;
+  keys: Record<string, { iv: string; key: string }>;
+}
+
+/** A fresh keypair. Not stored and not reused between runs. */
+export function identity(): Promise<Identity>;
+
+/** The short name of a public key; the same key always names itself the same. */
+export function fingerprint(key: JsonWebKey): Promise<string>;
+
+/**
+ * Seal one message for a set of readers, with a key used once and discarded.
+ *
+ * This does not stop a reader keeping their own copy — they are handed the
+ * text, which is the point of sending it — and it does not authenticate
+ * anybody, since whoever assembles the reader list decides who is on it. See
+ * the header of `lib/seal.js` for what it does and does not protect against.
+ */
+export function seal(text: string, me: Identity, readers: JsonWebKey[]): Promise<Envelope>;
+
+/** Open an envelope addressed to you; null if it was not, which is not an error. */
+export function unseal(envelope: Envelope | null | undefined, me: Identity): Promise<string | null>;
+
+/** Whether this environment has the crypto the rest of this needs. */
+export function available(): boolean;
