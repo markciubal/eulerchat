@@ -51,9 +51,16 @@ function connect() {
 
   ws.addEventListener('open', async () => {
     backoff = 500;
+    // Kept as a promise as well as a value. Making the keys takes a moment,
+    // and anything that needs them has to be able to wait for them rather than
+    // find `state.identity` still null and carry on without.
     if (available() && !state.identity) {
-      state.identity = await identity();
-      send({ type: 'keys', keyId: state.identity.id, publicKey: state.identity.publicKey });
+      state.identityReady = identity().then((me) => {
+        state.identity = me;
+        send({ type: 'keys', keyId: me.id, publicKey: me.publicKey });
+        return me;
+      });
+      await state.identityReady;
     }
     notify('');
     const previous = remembered();
@@ -189,6 +196,8 @@ function handleFrame(evt) {
 
     case 'readers':
       state.readers = msg.readers ?? [];
+      // Whoever asked for this list is waiting on it rather than on a timer.
+      state.awaitingReaders?.(msg);
       break;
 
     case 'recording':
@@ -620,38 +629,122 @@ $('composer').addEventListener('submit', (evt) => {
   if (!room || !body.value.trim()) return;
 
   const text = body.value;
-  body.value = '';
 
-  if (!state.sealing || !state.identity) {
+  // Only when they did not ask for it does plaintext go out on its own. The
+  // two conditions used to be one `if`, so a message typed before the keys
+  // had finished being made — which is a real window, not a theoretical one —
+  // went out unlocked from a page with the box ticked.
+  if (!state.sealing) {
+    body.value = '';
     send({ type: 'post', tags: room.subjects, body: text });
     return;
   }
 
   // Sealed to whoever is in the room right now. Anyone who arrives later
   // cannot read it, which is what a key used once and thrown away means.
-  send({ type: 'readers', room: room.key });
-  setTimeout(async () => {
-    const readers = (state.readers ?? []).map((r) => r.publicKey).filter(Boolean);
-    if (!readers.length) {
-      notify('Nobody is here to receive it — sent unlocked instead.');
-      send({ type: 'post', tags: room.subjects, body: text });
+  //
+  // Waited on properly, and this matters more than it looks. This used to ask
+  // for the reader list and then sleep 120ms, which is shorter than a great
+  // many real round trips — and when the list had not arrived it fell through
+  // to sending the message unlocked. Somebody on a slow connection, who had
+  // ticked the box and been told their words were locked, sent them in the
+  // clear. A request to encrypt that cannot be honoured must fail, not
+  // quietly do the other thing.
+  // Locking takes a round trip to find out who is in the room, so say that
+  // something is happening. Pressing post and watching nothing change is how
+  // people come to press it twice.
+  notify('Locking…');
+
+  (async () => {
+    // The keys may still be being made; wait rather than proceed without them.
+    const me = state.identity ?? (await Promise.race([
+      state.identityReady ?? Promise.resolve(null),
+      new Promise((r) => setTimeout(() => r(null), 8000)),
+    ]));
+
+    const list = me ? await readersFor(room.key) : [];
+    const readers = (list ?? []).map((r) => r.publicKey).filter(Boolean);
+
+    if (!me || !readers.length) {
+      // Their words are still in the box, because nothing cleared it: it is
+      // emptied when the message has gone, not when it was asked to go.
+      // Losing what you typed is a nuisance; having it sent unlocked when you
+      // asked for locked is a broken promise.
+      notify(
+        !me || list === null
+          ? 'Could not lock this message, so it was not sent — it is still in the box.'
+          : 'Nobody is here to receive it yet, so it was not sent — it is still in the box.',
+      );
       return;
     }
-    const envelope = await seal(text, state.identity, readers);
+
+    const envelope = await seal(text, me, readers);
     send({ type: 'post', tags: room.subjects, body: '', envelope });
-  }, 120);
+    notify('');
+    // Cleared now that it has actually gone — and only if they have not
+    // started writing something else while they waited.
+    if (body.value === text) body.value = '';
+  })();
 });
 
-/** Their own copy, if they asked for one. Nobody else's. */
+/**
+ * Who is in a room, as a promise rather than as a guess about how long the
+ * network takes. Resolves with the list, or null if the answer never came.
+ */
+function readersFor(roomKey, limitMs = 8000) {
+  return new Promise((resolve) => {
+    const done = (value) => {
+      clearTimeout(timer);
+      state.awaitingReaders = null;
+      resolve(value);
+    };
+    const timer = setTimeout(() => done(null), limitMs);
+    // Only the answer to the question that was asked. Sealing to the people in
+    // some other room would produce a message the room it was posted to cannot
+    // read, and hand it to people who were never in the conversation.
+    state.awaitingReaders = (frame) => {
+      if (frame.room !== roomKey) return;
+      done(frame.readers ?? []);
+    };
+    send({ type: 'readers', room: roomKey });
+  });
+}
+
+const KEPT_KEY = 'eulerchat.kept';
+const KEPT_MOST = 500;
+
+/**
+ * Their own copy, if they asked for one. Nobody else's.
+ *
+ * The stored record is read back at startup, which it was not before: this
+ * began every session with an empty list and then wrote that list over the
+ * saved one, so the first message after a reload destroyed everything kept
+ * until then. A record that survives only until you close the tab is not the
+ * thing that was asked for.
+ */
 function keep(message) {
   if (!state.recording) return;
   state.kept.push({ room: message.room, author: message.author, body: message.body, at: message.at });
+  // Trimmed here and not only on the way out, or a long session grows a list
+  // it never stops holding.
+  if (state.kept.length > KEPT_MOST) state.kept = state.kept.slice(-KEPT_MOST);
   try {
-    localStorage.setItem('eulerchat.kept', JSON.stringify(state.kept.slice(-500)));
+    localStorage.setItem(KEPT_KEY, JSON.stringify(state.kept));
   } catch {
     /* no room, or a private window: the copy is a convenience */
   }
 }
+
+/** Whatever was kept before this tab opened. */
+function restoreKept() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(KEPT_KEY) ?? '[]');
+    if (Array.isArray(saved)) state.kept = saved.slice(-KEPT_MOST);
+  } catch {
+    /* unreadable or absent; starting empty is the only option left */
+  }
+}
+restoreKept();
 
 $('sealed').addEventListener('change', (evt) => {
   if (evt.target.checked && !available()) {
