@@ -399,3 +399,93 @@ test('cancelling reports nothing', async () => {
   assert.equal(client.document.querySelector('.why'), null);
   assert.deepEqual(client.socket.sent.filter((f) => f.type === 'report'), []);
 });
+
+// --- votes, replies and groups in the browser ------------------------------
+
+test('agreeing sends a vote and shows what everyone else thinks', async () => {
+  const client = await loadClient();
+  await inRoom(client, from('hila', 'a thought'));
+
+  const agree = client.document.querySelector('#log .vote-up');
+  assert.ok(agree, 'there is a way to agree');
+  agree.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+
+  const [sent] = client.socket.sent.filter((f) => f.type === 'vote');
+  assert.equal(sent.value, 1);
+  assert.equal(sent.messageId, 'm1');
+
+  // The tally is what the server says it is, not what this browser guessed.
+  client.emit({ type: 'votes', messageId: 'm1', up: 3, down: 1, score: 2 });
+  assert.match(client.document.querySelector('#log .vote-up').textContent, /3/);
+  assert.match(client.document.querySelector('#log .vote-down').textContent, /1/);
+});
+
+test('replying carries the message it answers, and can be called off', async () => {
+  const client = await loadClient();
+  await inRoom(client, from('hila', 'is akrasia a failure of reason or of desire?'));
+
+  client.document.querySelector('#log .reply')
+    .dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  assert.equal(client.$('replying').hidden, false, 'it says who you are answering');
+  assert.match(client.$('replying').textContent, /hila/);
+
+  client.$('body').value = 'of desire, surely';
+  client.$('composer').dispatchEvent(
+    new client.document.defaultView.Event('submit', { cancelable: true, bubbles: true }),
+  );
+
+  const [post] = client.socket.sent.filter((f) => f.type === 'post');
+  assert.equal(post.replyTo, 'm1');
+  assert.equal(client.$('replying').hidden, true, 'and it stops being a reply afterwards');
+
+  // Starting one by accident must be easy to undo.
+  client.document.querySelector('#log .reply')
+    .dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  client.document.querySelector('.stop-replying')
+    .dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  assert.equal(client.$('replying').hidden, true);
+});
+
+test('a message quotes what it was answering', async () => {
+  const client = await loadClient();
+  await inRoom(client, {
+    type: 'message',
+    message: {
+      id: 'm9', room: 'art', subjects: ['art'], author: 'wren', authorId: 'w',
+      body: 'of desire, surely', at: Date.now(),
+      replyTo: { id: 'm1', author: 'hila', excerpt: 'is akrasia a failure', sealed: false },
+    },
+  });
+
+  const quote = client.document.querySelector('#log .quoted');
+  assert.ok(quote, 'the answer shows what it answered');
+  assert.match(quote.textContent, /hila/);
+  assert.match(quote.textContent, /akrasia/);
+});
+
+test('making a group offers a link that carries its name', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+
+  client.$('cluster-new').dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+
+  const link = client.$('cluster-url').getAttribute('href');
+  assert.match(link, /cluster=/, 'a link somebody can be sent');
+  assert.equal(client.$('cluster-share').hidden, false);
+
+  // And joining an interest now happens inside the group rather than outside.
+  client.$('cluster-name').value = 'kite-fox-9';
+  client.$('cluster-name').dispatchEvent(new client.document.defaultView.Event('change', { bubbles: true }));
+  assert.match(client.$('cluster-now').textContent, /kite-fox-9/);
+});
+
+test('nonsense is not a group name', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+
+  client.$('cluster-name').value = 'Not A Group';
+  client.$('cluster-name').dispatchEvent(new client.document.defaultView.Event('change', { bubbles: true }));
+
+  assert.match(client.$('notice').textContent, /not a group name/i);
+  assert.equal(client.$('cluster-share').hidden, true);
+});
