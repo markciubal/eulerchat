@@ -66,8 +66,23 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocketServer({ server });
 
+// Same reasoning as the per-socket handler: an unheard 'error' on either of
+// these is an uncaught exception, and an uncaught exception is every room in
+// the place going down at once.
+wss.on('error', (err) => console.error('websocket server:', err.message));
+server.on('clientError', (err, socket) => {
+  socket.destroy();
+  void err;
+});
+
 const send = (socket, payload) => {
-  if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(payload));
+  // The readyState check loses a race with a socket closing underneath us, and
+  // the failure mode of losing it is an error event rather than a return code.
+  try {
+    if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(payload));
+  } catch {
+    /* they are gone; their close handler will clear them out */
+  }
 };
 
 /**
@@ -93,12 +108,21 @@ const pushDiagrams = () => {
 const HEARTBEAT_MS = 25_000;
 const heartbeat = setInterval(() => {
   for (const session of world.sessions.values()) {
-    if (session.socket.alive === false) {
-      session.socket.terminate();
-      continue;
+    // A socket can be closing while its close event is still queued, and
+    // pinging one then makes `ws` emit an error rather than return quietly.
+    // One unhealthy connection must not be able to stop the heartbeat for
+    // every other connection, so each is attempted on its own.
+    try {
+      if (session.socket.readyState !== session.socket.OPEN) continue;
+      if (session.socket.alive === false) {
+        session.socket.terminate();
+        continue;
+      }
+      session.socket.alive = false;
+      session.socket.ping();
+    } catch {
+      /* it is on its way out; the close handler will tidy up */
     }
-    session.socket.alive = false;
-    session.socket.ping();
   }
 }, HEARTBEAT_MS);
 wss.on('close', () => clearInterval(heartbeat));
@@ -121,6 +145,14 @@ wss.on('connection', (socket) => {
   socket.alive = true;
   socket.on('pong', () => {
     socket.alive = true;
+  });
+
+  // An EventEmitter with no 'error' listener rethrows, so a single client with
+  // a reset connection would take the process down and every other person in
+  // every other room with it. `ws` requires this listener; without it the
+  // server is one bad network away from stopping.
+  socket.on('error', () => {
+    // Nothing to do but let it close — 'close' always follows.
   });
 
   send(socket, {
@@ -259,6 +291,30 @@ wss.on('connection', (socket) => {
     pushDiagrams();
   });
 });
+
+/**
+ * Say why, on the way down.
+ *
+ * A long-running server exited here with code 1 and left nothing behind — no
+ * stack, no message, nothing to work from, so the cause is still unknown. An
+ * uncaught exception inside a timer or an event handler dies outside every
+ * try/catch in the file, and Node's default is to print to a stderr that may
+ * already be gone. These do not make the server survive anything it should
+ * not: it still exits. It exits having said what happened.
+ */
+for (const [event, label] of [
+  ['uncaughtException', 'uncaught exception'],
+  ['unhandledRejection', 'unhandled rejection'],
+]) {
+  process.on(event, (err) => {
+    console.error(
+      `eulerchat: ${label} — ${err?.stack ?? err}\n` +
+        `  ${world.sessions.size} sessions, ${world.subjects.size} subjects, ` +
+        `${world.members.size} members at the time`,
+    );
+    process.exit(1);
+  });
+}
 
 server.listen(PORT, () => {
   const counts = world.census();

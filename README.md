@@ -303,6 +303,13 @@ What it does **not** survive is being scaled out:
 - **Solving blocks the event loop.** Layouts run on the main thread, so a burst
   of first paints stalls all other traffic — worse on a shared-CPU dyno than on
   a laptop.
+- **One long run ended in an unexplained exit.** A server left up for hours
+  exited with code 1 and left no stack behind, and the cause is still not
+  known. The obvious gaps were closed afterwards — sockets, the socket server
+  and the HTTP server all have error listeners now, and the heartbeat skips
+  anything not open — but none of those reproduce it, so the fix is unproven.
+  What was certainly missing was the evidence: uncaught exceptions and
+  rejections now print a stack and the session counts before exiting.
 
 Idle timeouts are handled: the server pings every 25s, inside Heroku's 55s
 cutoff, and the client reconnects with backoff and resumes its identity and
