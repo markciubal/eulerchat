@@ -775,6 +775,38 @@ input:disabled {
   margin-left: 5px;
 }
 
+/* --- keys --------------------------------------------------------------- */
+
+/* The letters after a name. Set apart from the name in every way that type
+   allows - face, weight, colour - because the name is whatever somebody typed
+   and these are not, and the two must never be mistaken for one another. */
+.key {
+  font: 11px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 400;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  user-select: all;
+}
+
+.key-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Giving this a display of its own takes it out from under the `hidden`
+   attribute, which is only a display rule itself and loses to any other. */
+.key-wrap[hidden] {
+  display: none;
+}
+
+.new-key {
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 999px;
+  color: var(--muted);
+}
+
 /* --- reporting ---------------------------------------------------------- */
 
 /* Present on every message and loud on none of them. Somebody looking for it

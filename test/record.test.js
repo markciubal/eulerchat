@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseHTML } from 'linkedom';
 import { identity, unseal } from '../lib/seal.js';
+import { challenge } from '../lib/proof.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(here, '..', 'public');
@@ -506,4 +507,105 @@ test('the invitation is drawn as a square of elements, not a picture', async () 
   assert.equal(cells.length, size * size);
   assert.equal(holder.querySelectorAll('img, svg, picture').length, 0);
   assert.ok([...cells].some((c) => c.className === 'qr-on'), 'some of it is dark');
+});
+
+// --- keys ------------------------------------------------------------------
+
+test('the browser shows that its key is its own, when the server asks', async () => {
+  const client = await loadClient();
+  client.socket.emit('open', {});
+  await waitFor(() => client.socket.sent.some((f) => f.type === 'keys'), 'the key to be claimed');
+  const claimed = client.socket.sent.find((f) => f.type === 'keys');
+
+  // Asked as a server asks, with a real challenge, and checked as one checks.
+  const asked = await challenge(claimed.publicKey);
+  client.emit({ type: 'challenge', keyId: claimed.keyId, offer: asked.offer });
+
+  await waitFor(() => client.socket.sent.some((f) => f.type === 'proof'), 'an answer');
+  const answer = client.socket.sent.find((f) => f.type === 'proof');
+  assert.equal(await asked.check(answer.mac), true);
+});
+
+test('a connection that blinks says its key again', async () => {
+  // It used to be said once per page. Whoever reconnected was then somebody
+  // the server held no key for: nothing could be locked for them, and now
+  // there would be nothing beside their name either.
+  const client = await loadClient();
+  client.socket.emit('open', {});
+  await waitFor(() => client.socket.sent.filter((f) => f.type === 'keys').length === 1, 'the first claim');
+  client.socket.emit('open', {});
+  await waitFor(() => client.socket.sent.filter((f) => f.type === 'keys').length === 2, 'the second claim');
+
+  const [first, second] = client.socket.sent.filter((f) => f.type === 'keys');
+  assert.equal(second.keyId, first.keyId, 'and it is the same key, not another one');
+  assert.deepEqual(
+    client.socket.sent.filter((f) => f.type === 'resume'), [],
+    'with a key to show, an id is not what they come back by',
+  );
+});
+
+test('a key is drawn apart from the name, and cannot be typed into one', async () => {
+  const client = await loadClient();
+  await inRoom(client, from('wren', 'said under a key', { id: 'k1', authorKey: '3fA9xQ2kZk81mmQp' }));
+  // The server refuses the dot in a name. The picture must not depend on that.
+  client.emit(from('wren·3fA9xQ2k', 'said under nothing', { id: 'k2' }));
+  client.document.querySelector('#rooms button')
+    .dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+
+  const [real, fake] = client.document.querySelectorAll('#log .author');
+  const letters = real.querySelector('.key');
+  assert.ok(letters, 'the key has an element of its own');
+  assert.equal(letters.textContent, '·3fA9xQ2k', 'eight letters of it, after a dot');
+  assert.match(letters.title, /3fA9xQ2kZk81mmQp/, 'and all of it for anybody who asks');
+
+  // To a reader skimming, these two say the same thing. To anything that
+  // looks, only one of them has a key.
+  assert.equal(fake.textContent, real.textContent);
+  assert.equal(fake.querySelector('.key'), null);
+});
+
+test('your own key is shown beside your name once it has been shown to the server', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  assert.equal(client.$('key-wrap').hidden, true, 'nothing to show before then');
+
+  client.emit({ type: 'welcome', you: { id: 'u1', name: 'wren', keyId: '3fA9xQ2kZk81mmQp' }, maxArity: 3 });
+  assert.equal(client.$('key-wrap').hidden, false);
+  assert.equal(client.$('key-mark').textContent, '·3fA9xQ2k');
+  // In full somewhere, because the full one is what a moderator list is made of.
+  assert.match(client.$('key-mark').title, /3fA9xQ2kZk81mmQp/);
+});
+
+test('the name comes back with the key', async () => {
+  // The server forgets a person a minute after they go. Tomorrow the key is
+  // the same and the name would be `guest-3f2a`, unless the browser says it.
+  const client = await loadClient({ storage: { 'eulerchat.name': 'wren' } });
+  client.socket.emit('open', {});
+  await waitFor(() => client.socket.sent.some((f) => f.type === 'keys'), 'the key to be claimed');
+
+  // Before the key is shown there is nobody in particular to be called wren.
+  client.emit({ type: 'welcome', you: { id: 'u1', name: 'guest-3f2a' }, maxArity: 3 });
+  assert.deepEqual(client.socket.sent.filter((f) => f.type === 'identify'), []);
+
+  client.emit({ type: 'welcome', you: { id: 'u1', name: 'guest-3f2a', keyId: '3fA9xQ2kZk81mmQp' }, maxArity: 3 });
+  assert.deepEqual(client.socket.sent.filter((f) => f.type === 'identify'), [{ type: 'identify', name: 'wren' }]);
+
+  // Once. A server that tidied the name into something else must not be
+  // argued with for ever.
+  client.emit({ type: 'welcome', you: { id: 'u1', name: 'wre', keyId: '3fA9xQ2kZk81mmQp' }, maxArity: 3 });
+  assert.equal(client.socket.sent.filter((f) => f.type === 'identify').length, 1);
+});
+
+test('a kept copy holds everything the server will check it by', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  client.emit({ type: 'recording', on: true });
+  client.emit(from('wren', 'worth keeping', { id: 'k3', v: 2, authorKey: '3fA9xQ2kZk81mmQp' }));
+
+  // The name and the key are part of what the server hashed. A copy without
+  // them is a copy of some other message, and is refused as one.
+  const [kept] = client.kept();
+  assert.equal(kept.v, 2);
+  assert.equal(kept.authorKey, '3fA9xQ2kZk81mmQp');
+  assert.equal(kept.author, 'wren');
 });

@@ -44,12 +44,17 @@ const json = (res, status, body) => {
 
 /** What a message looks like to somebody who is not in the room. */
 const publicMessage = (message, tally) => ({
+  // Which form of commitment names it, so that a copy taken from here can
+  // still be looked up in the deletion record; see `lib/receipt.js`.
+  v: message.v,
   id: message.id,
   room: message.room,
   subjects: message.subjects,
   cluster: clusterOf(message.subjects?.[0] ?? '') ?? null,
   author: message.author,
   authorId: message.authorId,
+  // Shown in the room beside the name, so it is no more private than the name.
+  authorKey: message.authorKey ?? null,
   at: message.at,
   sealed: Boolean(message.sealed),
   // Readable only to whoever holds a key, which the server does not.

@@ -15,11 +15,21 @@ export const MAX_SUBSCRIPTIONS: number;
 export const MAX_SUBJECTS: number;
 
 export interface Message {
+  /**
+   * Which form of commitment names this message. Everything posted now is 2,
+   * which covers the name and the key; absent on what an older ledger holds.
+   */
+  v?: 2;
   id: string;
   room: RegionKey;
   subjects: string[];
   author: string;
   authorId: string;
+  /**
+   * The fingerprint of the key it was said under, written after the name.
+   * Present only when whoever posted it had shown they hold that key.
+   */
+  authorKey?: string;
   /** Empty when `sealed`: the server has no readable copy of one of those. */
   body: string;
   at: number;
@@ -95,6 +105,12 @@ export class World {
 
   addSubject(name: string): string;
   addUser(name: string): string;
+  /**
+   * Change what somebody is called; returns the name they now have. The dot
+   * that separates a name from a key is taken out, and an unusable name leaves
+   * the old one standing.
+   */
+  rename(userId: string, name: string): string | null;
   subscription(userId: string): Set<string>;
   join(userId: string, subject: string): void;
   leave(userId: string, subject: string): void;
@@ -114,7 +130,18 @@ export class World {
     userId: string,
     tags: Iterable<string>,
     body: string,
-    options?: { envelope?: Envelope | null },
+    options?: {
+      envelope?: Envelope | null;
+      /** The id of the message being answered, if it is in the same room. */
+      replyTo?: string | null;
+      /**
+       * A key fingerprint to write beside the author's name. Pass one only for
+       * a key the author has SHOWN they hold (`challenge` in `eulerchat/proof`);
+       * the world holds no connections and cannot check, so this is you
+       * vouching for it.
+       */
+      authorKey?: string | null;
+    },
   ): Message;
 
   /** Drop everything past its retention window. Returns how much went. */

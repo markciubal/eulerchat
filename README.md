@@ -148,7 +148,8 @@ const chat = createEulerChat({
   mount: '/chat',             // lives under a path; omit for the root
   serveClient: true,          // also serve the bundled UI
   publicApi: false,           // the default: no open read API unless asked for
-  isModerator: () => false,   // the default: nobody may read reports
+  moderators: [],             // key fingerprints that may read reports; nobody by default
+  authenticate: undefined,    // (req) => account | null, if you have accounts; see below
 });
 
 chat.world;     // membership, messages, diagramFor(), atlasFor()
@@ -207,7 +208,8 @@ rooms over your own transport, and building an atlas.
 | `eulerchat/knowledge` | a small default hierarchy |
 | `eulerchat/mold` | `Mold`, `weave` — what grows between them |
 | `eulerchat/abbrev` | `shortLabels`, `abbreviate` — naming the overlaps |
-| `eulerchat/seal` | `identity`, `seal`, `unseal` — a key per message |
+| `eulerchat/seal` | `identity`, `rememberedIdentity`, `seal`, `unseal` — a key per message |
+| `eulerchat/proof` | `challenge`, `prove`, `mark` — showing a key is yours |
 | `eulerchat/plain` | `plain` — words only: no images, no emoji |
 | `eulerchat/cluster` | `newCluster`, `within`, `inviteLink` — small groups by name |
 | `eulerchat/receipt` | `verify`, `findDeletion` — checking what was deleted |
@@ -279,6 +281,110 @@ on everything else, so a host route at `/api/me` keeps working. Move it out of
 the way with `apiPath`.
 
 
+## Who somebody is
+
+Nobody, by default, and that is a decision rather than an omission. There are
+no accounts. A connection is a guest, a name is whatever somebody typed, and
+anybody can type anybody's.
+
+What a person *can* have is a key. The browser makes one, keeps it, and shows
+the server that it holds it; from then on the first eight characters of its
+fingerprint are written after their name:
+
+```
+wren·3fA9xQ2k     the same person as yesterday's wren·3fA9xQ2k
+wren·Zk81mmQp     somebody else, who also typed "wren"
+wren              somebody with no key at all
+```
+
+Names are not reserved. A registry of names is durable state, gets squatted the
+day it opens, and still loses to a Cyrillic `а`. The letters cannot be typed:
+they are drawn as their own element, the dot is refused in names, and the
+server works the fingerprint out from the key rather than taking the client's
+word for what it is called.
+
+**Claiming a key is not holding it.** Every key in the place is sent to
+everybody, so that messages can be sealed to it. A connection that says "this
+one is mine" has therefore said nothing, and until it has answered a challenge
+that only the private half can answer, its key is not written beside its name
+and gives it no standing of any kind:
+
+```js
+import { challenge, prove } from 'eulerchat/proof';
+
+const asked = await challenge(theirPublicKey);   // the server
+const mac = await prove(asked.offer, me);        // the browser
+await asked.check(mac);                          // true, once
+```
+
+The check is a MAC under a secret the two keys agree, not "decrypt this and
+send it back" — a client that decrypts what it is handed and returns the
+plaintext is a decryption service, and a server could pass off a real sealed
+message as the challenge.
+
+Two connections that show the same key are the same person: one member of a
+room, one vote, and closing one window is not leaving. Somebody who drops and
+comes back inside their minute of grace is recognised by showing the key, and
+**not** by remembering their id — an id is printed on every message a person
+posts, so it used to be that knowing one was enough to become them.
+
+### Moderators, without accounts
+
+```
+eulerchat --moderator 3fA9xQ2kZk81mmQp      # as many times as there are moderators
+EULERCHAT_MODERATORS=3fA9xQ2kZk81mmQp,...
+```
+
+```js
+createEulerChat({ world, moderators: ['3fA9xQ2kZk81mmQp'] });
+```
+
+The full fingerprint, which the interface shows each person for their own key
+on hover. It counts only for a connection that has shown the key, because what
+sits behind it is the list of who reported whom.
+
+### If you do have accounts
+
+```js
+createEulerChat({
+  world, server,
+  authenticate: async (req) => myAuth.userFor(req.headers.cookie),
+  // -> { id: 'u_81', name: 'wren', staff: true }, or null for a visitor
+  isModerator: (userId, session) => session.account?.staff === true,
+});
+```
+
+It is handed the upgrade request and whatever it returns rides along as
+`session.account`. `id` makes every connection from that account one person;
+`name` is what they are called to begin with; null is a guest like any other.
+Throwing refuses the connection, since an answer that could not be obtained is
+not a yes. Frames that arrive while you are looking somebody up are held and
+replayed, not dropped. Left out, everybody is anonymous, and nothing about the
+anonymous path changes when it is put in.
+
+### What a key is not
+
+- **It is not a person.** Keys cost nothing to make, so one person can be as
+  many of them as they like. One key, one vote is not one person, one vote, and
+  nothing short of accounts or a price makes it so.
+- **It is a decision against anonymity, and it should be made knowingly.**
+  Everything said under one key can be tied together by anybody, for as long as
+  the key is kept — that is the point of it and the cost of it. So the way out
+  is as short as the way in: *new key*, beside the name, throws it away, and
+  whoever comes back is a stranger. `forgetIdentity()` is the same thing in
+  code.
+- **A lost key is a lost name.** There is no account behind it and nobody to
+  ask. Clearing site data loses it; a second device is a second key.
+- **It lives in the browser.** The private half is non-extractable, so script
+  can use it and cannot read it out — but whoever can run script on your origin
+  can use it, and a copied browser profile takes it along.
+- **No browser has run the storage.** The proof and the protocol are tested end
+  to end over real sockets; the IndexedDB half is tested against a stand-in
+  with the same one-operation contract, because there is no IndexedDB in Node.
+  Without storage — a private window — the key lasts as long as the page and
+  the interface says so.
+
+
 ## Sealing, and what sealing is not
 
 A message can be locked before it leaves the browser. Each one gets its own
@@ -317,7 +423,10 @@ by their own browser and it is theirs alone.
   wrapped key like any other member. This protects a conversation from a server
   that stores and later leaks, not from one that is actively against you.
   Defending against that needs people to compare keys by some route the server
-  does not control, which is not built.
+  does not control, which is not built. A key that is kept between visits gives
+  them something stable to compare — the letters after a name are its
+  fingerprint — but the server still assembles the reader list, so that
+  narrows the gap and does not close it.
 - **It does not hide who is talking to whom**, or when, or how often. The server
   routes, so the server knows.
 
@@ -363,6 +472,15 @@ Three things are refused however confidently they are offered:
 | **a hash it does not know** | invented, altered, re-attributed or moved between rooms |
 | **anything in the deletion chain** | somebody pressed delete; a restart is not a way to undo that |
 | **anything past twelve hours** | the promise was twelve hours, not twelve hours and a restart |
+
+*Re-attributed* includes the name. It did not always: the hash covered an
+author's id, which is a random string nobody ever sees, and not the name a
+message is shown under — so a genuine message could be handed back under any
+name at all and still match. Every message posted now is hashed in a second
+form that covers the name and the key beside it, and is written as JSON rather
+than joined with a character a message body is free to contain. What an older
+ledger holds still verifies in the first form, for the twelve hours any of it
+has left.
 
 `Ledger` is two methods, `append` and `load`, so putting this behind Postgres,
 Redis or a queue does not mean implementing a storage engine. `load` only runs
@@ -456,7 +574,10 @@ a stranger read it. What is said inside is still public unless it is locked.
 ## Votes
 
 One person, one vote. Pressing the same button again takes it back, and
-changing your mind replaces rather than adds.
+changing your mind replaces rather than adds. *Person* is doing less work
+there than it sounds: it means one key, or one connection for somebody with no
+key, and both are free to make more of. Two windows showing the same key are
+one voter; somebody determined to be several is several.
 
 Nothing about votes feeds the report ranking, and that separation is
 load-bearing. A message plenty of people disagree with is not a message that
@@ -1027,9 +1148,17 @@ The pure algebra in `lib/` is already independent of where state lives; only
   million regions and pushed *everyone's* view past a second. The catalogue is
   capped, and each connection gets a leaky bucket priced by how expensive each
   frame is. None of that is authentication.
-- **No moderation, no auth.** Derived rooms have a real unsolved question
-  behind them: neither parent circle's moderators obviously own the
-  intersection, and rooms grow exponentially while moderators do not.
+- **No accounts, and thin moderation.** A key says somebody is the same
+  somebody as before and nothing about who; see **Who somebody is**. Reports
+  are collected and a moderator can read them, and that is all a moderator can
+  do. Derived rooms have a real unsolved question behind them: neither parent
+  circle's moderators obviously own the intersection, and rooms grow
+  exponentially while moderators do not.
+- **Coming back by id is only as good as the id is secret, and it is not.**
+  Somebody with no key is resumed inside their minute of grace by an id that
+  is printed on everything they posted. A key closes that for whoever has one;
+  a browser that cannot make keys — any page not served over https or from
+  localhost — is where it stays open.
 - **Anyone can create a subject.** Whoever controls circle creation controls
   whether the map stays legible; this prototype does not control it at all.
 - **Rendering is verified by rasteriser, not by browser.** `npm run render`

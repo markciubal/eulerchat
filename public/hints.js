@@ -125,6 +125,19 @@ export const HELP = {
       + 'here will exist whatever you or we set. Treat anything you say as something that '
       + 'has been kept.',
   },
+  key: {
+    title: 'The letters after your name',
+    short:
+      'Anybody can type any name, so a name alone says nothing. The letters after it come '
+      + 'from a key that only this browser holds, and nobody can copy them by typing.',
+    more:
+      'It is how people can tell that whoever is called this today is the same person as '
+      + 'yesterday. It is also the price: everything you say under one key can be tied '
+      + 'together by anybody, for as long as you keep it. There is no account behind it, so '
+      + 'it says you are the same person and nothing about which person. "New key" throws '
+      + 'it away. Nobody can connect you to the old one afterwards, and nothing can bring '
+      + 'the old one back, in this browser or any other.',
+  },
   deletion: {
     title: 'What the server forgets',
     short:

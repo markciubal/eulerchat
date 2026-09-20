@@ -10,6 +10,28 @@ export interface Session<Socket = unknown> {
   socket: Socket;
   /** What this connection was last sent, so unchanged views cost nothing. */
   lastView: string | null;
+  /** Whatever the host's `authenticate` said about this connection, if anything. */
+  account?: Account | null;
+  /** The fingerprint of the key this connection has claimed. A claim; see `proven`. */
+  keyId?: string;
+  publicKey?: JsonWebKey | null;
+  /**
+   * Whether the connection has shown that it holds `keyId`. Anything that gives
+   * a key standing must read this: claiming a key is free, and every key in
+   * the place is known to everybody in it.
+   */
+  proven?: boolean;
+}
+
+/**
+ * Who a host says a connection is. `id` makes every connection from that
+ * account the same person; `name` is what they are called to begin with; the
+ * rest is yours, and comes back to you on `session.account`.
+ */
+export interface Account {
+  id?: string | number;
+  name?: string;
+  [key: string]: unknown;
 }
 
 /**
@@ -111,6 +133,31 @@ export function createEulerChat(options?: {
   notifications?: Notifications;
   /** Also serve the bundled browser client. */
   serveClient?: boolean;
+  /**
+   * Serve every unlocked conversation to anybody who asks. Off unless asked
+   * for; the bundled server asks for it.
+   */
+  publicApi?: boolean;
+  /** Where the open read API lives. Defaults to `/api`. */
+  apiPath?: string;
+  /**
+   * Who the host says a connection is, from the upgrade request - its cookies,
+   * its headers, its query string. Everybody is an anonymous guest when this
+   * is left out, and that is the default on purpose. Return null for a
+   * visitor; throw, or reject, to refuse the connection.
+   */
+  authenticate?: (req: IncomingMessage) => Account | null | undefined | Promise<Account | null | undefined>;
+  /**
+   * Key fingerprints, in full, that may read reports - for a place with no
+   * accounts. Counts only for a connection that has shown it holds the key.
+   * Ignored when `isModerator` is given.
+   */
+  moderators?: Iterable<string>;
+  /**
+   * Who may read reports. Nobody by default. `session.account` is what your
+   * `authenticate` returned; `session.proven` and `session.keyId` are the key.
+   */
+  isModerator?: (userId: string, session: Session) => boolean;
 }): EulerChat;
 
 import type { World } from './store.js';

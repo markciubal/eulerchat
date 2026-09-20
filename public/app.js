@@ -2,7 +2,8 @@ import { stroke, regionFill } from './diagram.js';
 import { renderAtlas, zoneAt, paintAtlas, relabel } from './atlasview.js';
 import { fitTo, pointsOf, renderMinimap } from './minimap.js';
 import { attachHelp, busyness, createCard, when } from './hints.js';
-import { available, identity, seal, unseal } from '../lib/seal.js';
+import { available, forgetIdentity, rememberedIdentity, seal, unseal } from '../lib/seal.js';
+import { mark, prove } from '../lib/proof.js';
 import { REASONS } from '../lib/flag.js';
 import { plain, saidAbout } from '../lib/plain.js';
 import { clusterFromLink, clusterOf, inviteLink, isCluster, label as subjectLabel, newCluster } from '../lib/cluster.js';
@@ -61,18 +62,29 @@ function connect() {
 
   ws.addEventListener('open', async () => {
     backoff = 500;
+    named = false;
     // Kept as a promise as well as a value. Making the keys takes a moment,
     // and anything that needs them has to be able to wait for them rather than
     // find `state.identity` still null and carry on without.
-    if (available() && !state.identity) {
-      state.identityReady = identity().then((me) => {
-        state.identity = me;
-        send({ type: 'keys', keyId: me.id, publicKey: me.publicKey });
-        return me;
-      });
-      await state.identityReady;
+    //
+    // The key is the same one as last time where the browser will hold one,
+    // and it is sent on every connection, not only the first. It used to be
+    // sent once per page, so anybody whose connection had blinked was somebody
+    // the server held no key for, and nothing could be locked for them until
+    // they reloaded.
+    let me = null;
+    if (available()) {
+      state.identityReady ??= rememberedIdentity().then((made) => (state.identity = made));
+      me = await state.identityReady.catch(() => null);
     }
     notify('');
+
+    if (me) {
+      // Whoever this was before is taken back by showing the key; see the
+      // `challenge` frame. The remembered id below would be refused anyway.
+      send({ type: 'keys', keyId: me.id, publicKey: me.publicKey });
+      return;
+    }
     const previous = remembered();
     if (previous) send({ type: 'resume', userId: previous });
   });
@@ -102,6 +114,85 @@ const remember = (id) => {
   }
 };
 
+// --- who you are ------------------------------------------------------------
+
+/**
+ * A name, and after it the letters of the key it was said under.
+ *
+ * Two elements, never one string. The name is whatever somebody typed and the
+ * letters are not, and if they were ever joined into text then a name could be
+ * typed that looked like both. The server refuses the dot in names for the
+ * same reason; this is the half of that rule that lives in the picture.
+ */
+function signed(name, keyId) {
+  const out = document.createDocumentFragment();
+  out.append(document.createTextNode(name));
+  if (keyId) {
+    const letters = document.createElement('span');
+    letters.className = 'key';
+    letters.textContent = `·${mark(keyId)}`;
+    letters.title = `said under the key ${keyId}`;
+    out.append(letters);
+  }
+  return out;
+}
+
+/** Your own key, beside your own name, once the server has seen it shown. */
+function paintKey() {
+  const keyId = state.me?.keyId;
+  $('key-wrap').hidden = !keyId;
+  if (!keyId) return;
+  $('key-mark').textContent = `·${mark(keyId)}`;
+  // In full on hover, because the full one is what a moderator list is made
+  // of, and somebody has to be able to read theirs out.
+  $('key-mark').title = state.identity?.kept
+    ? `your key: ${keyId}`
+    : `your key: ${keyId} (this browser would not keep it, so it lasts until you close the page)`;
+}
+
+/**
+ * The name goes with the key.
+ *
+ * The server forgets a person a minute after they leave, name included, so
+ * somebody coming back tomorrow with the same key would be `guest-3f2a` with
+ * the right letters after it. The browser remembers what they called
+ * themselves and says it again - once per connection, and only under a key,
+ * since without one there is nobody in particular to be called anything.
+ */
+const NAME_KEY = 'eulerchat.name';
+let named = false;
+function bringNameBack() {
+  if (named || !state.me?.keyId) return;
+  named = true;
+  let wanted = null;
+  try {
+    wanted = localStorage.getItem(NAME_KEY);
+  } catch {
+    /* a private window; they can type it again */
+  }
+  if (wanted && wanted !== state.me.name) send({ type: 'identify', name: wanted });
+}
+
+$('new-key').addEventListener('click', async () => {
+  // Everything that ties this browser to who it has been: the key, the name
+  // that went with it, and the id the last connection was known by.
+  await forgetIdentity();
+  try {
+    localStorage.removeItem(NAME_KEY);
+    sessionStorage.removeItem('circle.me');
+  } catch {
+    /* nothing was being kept there anyway */
+  }
+  state.identity = null;
+  state.identityReady = null;
+  state.me = null;
+  paintKey();
+  notify('That key is gone. You are somebody new here now.');
+  // A key belongs to a connection for as long as the connection lasts, so
+  // being somebody else means arriving again. The close handler reconnects.
+  ws?.close();
+});
+
 function handleFrame(evt) {
   const msg = JSON.parse(evt.data);
 
@@ -111,6 +202,25 @@ function handleFrame(evt) {
       remember(msg.you.id);
       // Never clobber what someone is in the middle of typing.
       if (document.activeElement !== $('name')) $('name').value = msg.you.name;
+      paintKey();
+      bringNameBack();
+      break;
+
+    case 'challenge':
+      // The server will not take our word that the key is ours, and should
+      // not. What goes back can only have been made with the private half,
+      // and is of no use for opening anything; see `lib/proof.js`.
+      if (state.identity) {
+        prove(msg.offer, state.identity)
+          .then((mac) => send({ type: 'proof', mac }))
+          .catch(() => {
+            /* no key beside the name this time; everything else still works */
+          });
+      }
+      break;
+
+    case 'proven':
+      // The `welcome` that follows carries it; nothing to do until then.
       break;
 
     case 'expired':
@@ -656,7 +766,7 @@ function renderRoom() {
 
     const who = document.createElement('span');
     who.className = 'author';
-    who.textContent = m.author;
+    who.append(signed(m.author, m.authorKey));
 
     const at = document.createElement('span');
     at.className = 'at';
@@ -1054,10 +1164,15 @@ function keep(message) {
   // server checks a returned copy by hashing it, and a hash of half a message
   // matches nothing.
   state.kept.push({
+    // Which form of hash the server named this by, and the key that was
+    // beside the name. Both are part of what gets hashed, so a copy without
+    // them is a copy the server will not recognise.
+    v: message.v,
     id: message.id,
     room: message.room,
     author: message.author,
     authorId: message.authorId,
+    authorKey: message.authorKey ?? undefined,
     body: message.body,
     at: message.at,
     sealed: Boolean(message.sealed),
@@ -1276,6 +1391,11 @@ $('funnel').addEventListener('change', (evt) => {
 
 $('name').addEventListener('change', (evt) => {
   send({ type: 'identify', name: evt.target.value });
+  try {
+    localStorage.setItem(NAME_KEY, evt.target.value);
+  } catch {
+    /* it will last as long as the server remembers them, as it used to */
+  }
   notify(`Saved. Others will see your messages signed "${evt.target.value}".`);
 });
 

@@ -75,6 +75,10 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/seal.js"
     },
+    "./proof": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/proof.js"
+    },
     "./plain": {
       "types": "./lib/index.d.ts",
       "default": "./lib/plain.js"

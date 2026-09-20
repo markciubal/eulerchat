@@ -397,6 +397,60 @@ export interface Envelope {
 /** A fresh keypair. Not stored and not reused between runs. */
 export function identity(): Promise<Identity>;
 
+/**
+ * Somewhere to keep a key between visits. `keep` stores the candidate unless
+ * one is already held, and answers with whichever is held afterwards - in one
+ * step, so that two tabs opening together end up as one person.
+ */
+export interface IdentityStore {
+  keep(candidate: { pair: CryptoKeyPair; publicKey: JsonWebKey }): Promise<{ pair: CryptoKeyPair; publicKey: JsonWebKey }>;
+  drop?(): Promise<void>;
+}
+
+/**
+ * The same identity as last time, where there is somewhere to keep one: the
+ * browser's IndexedDB by default. Never throws for want of storage; `kept`
+ * says whether this key will still be here next time.
+ *
+ * A key that persists makes everything said under it linkable for as long as
+ * it is kept. That is the point of it and the cost of it; `forgetIdentity` is
+ * the way out.
+ */
+export function rememberedIdentity(store?: IdentityStore | null): Promise<Identity & { kept: boolean }>;
+
+/** Drop the stored key. Whoever asks for an identity next is somebody new. */
+export function forgetIdentity(store?: IdentityStore | null): Promise<boolean>;
+
+// --- showing a key ---------------------------------------------------------
+
+/** What is sent to whoever claims a key: a key made for this one question, and a nonce. */
+export interface Offer {
+  publicKey: JsonWebKey;
+  nonce: string;
+}
+
+/**
+ * Ask whoever claims `publicKey` to show that they hold it. Send them `offer`
+ * and give what comes back to `check`, which answers once. Rejects if the key
+ * is not a usable P-256 key.
+ *
+ * This says that a connection holds a key. It says nothing about who anybody
+ * is: keys are free, so a key is a pseudonym and not a person.
+ */
+export function challenge(publicKey: JsonWebKey): Promise<{ offer: Offer; check(mac: unknown): Promise<boolean> }>;
+
+/**
+ * Answer a challenge with the key you hold. What this returns cannot open or
+ * help to open anything sealed, whoever's key the offer was made with.
+ */
+export function prove(offer: Offer, me: Pick<Identity, 'pair'>): Promise<string>;
+
+/** How much of a fingerprint is written after a name. */
+export declare const MARK_LENGTH: number;
+
+/** The part of a key's fingerprint that is written after a name. */
+export function mark(keyId: string | null | undefined): string;
+
 /** The short name of a public key; the same key always names itself the same. */
 export function fingerprint(key: JsonWebKey): Promise<string>;
 

@@ -25,6 +25,8 @@ import { populate } from './populate.js';
 import { Sessions } from './sessions.js';
 import { Notifications } from './notifications.js';
 import { parse } from '../lib/regions.js';
+import { fingerprint } from '../lib/seal.js';
+import { challenge } from '../lib/proof.js';
 import { createPublicApi } from './public-api.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -39,6 +41,9 @@ export { World, seed, populate, Sessions, Notifications };
  * @param {World}  [options.world]   the world to serve; a seeded one by default
  * @param {http.Server} [options.server]  an existing server to attach to
  * @param {boolean} [options.serveClient=true]  also serve the bundled UI
+ * @param {Iterable<string>} [options.moderators]  key fingerprints that may read reports
+ * @param {(req: http.IncomingMessage) => object | null | Promise<object | null>} [options.authenticate]
+ *   who the host says a connection is; anonymous when omitted
  * @returns {{world: World, server: http.Server, wss: WebSocketServer, close: () => void}}
  */
 export function createEulerChat(options = {}) {
@@ -61,15 +66,51 @@ export function createEulerChat(options = {}) {
    * trusted by someone who assumed it meant something. The host knows; it can
    * say.
    *
-   *   createEulerChat({ isModerator: (userId, session) => session.staff === true })
+   *   createEulerChat({ isModerator: (userId, session) => session.account?.staff === true })
+   *
+   * `session.account` is whatever the host's own `authenticate` said about the
+   * connection, below. A place with no accounts names its moderators by key
+   * instead:
+   *
+   *   createEulerChat({ moderators: ['3fA9xQ2kZk81mmQp'] })
+   *
+   * which is the full fingerprint the interface shows each person for their
+   * own key. It counts only once the connection has SHOWN that it holds the
+   * key. Claiming one is free - every key in the place is sent to everybody,
+   * so a moderator's is known to anyone who has been in a room with them - and
+   * what sits behind this check is the list of who reported whom.
    *
    * Defaulting to nobody means reports are collected and unreadable until
    * somebody decides who should read them, which is the right way round: the
    * failure is that moderation does not happen, not that it happens to the
    * wrong person.
    */
+  const moderators = new Set([...(options.moderators ?? [])].map(String));
   const isModerator =
-    typeof options.isModerator === 'function' ? options.isModerator : () => false;
+    typeof options.isModerator === 'function'
+      ? options.isModerator
+      : (userId, session) => session.proven === true && moderators.has(session.keyId);
+
+  /**
+   * Who the host says a connection is. Nobody, unless it has a way of knowing.
+   *
+   * Everybody here is anonymous by default, and that is a decision rather than
+   * an omission: a connection is a guest, and the most it can become on its
+   * own is a key. A host that already has accounts knows more than that, and
+   * this is where it says so - it is handed the upgrade request, with its
+   * cookies and headers, and whatever object it returns rides along as
+   * `session.account`:
+   *
+   *   authenticate: async (req) => myAuth.userFor(req.headers.cookie),
+   *   // -> { id: 'u_81', name: 'wren', staff: true }, or null for a visitor
+   *
+   * `name`, if there is one, is what they are called to begin with. `id`, if
+   * there is one, makes every connection from that account the same person:
+   * two tabs are one member of a room, with one vote. Null or undefined is a
+   * guest like any other. Throwing, or a rejected promise, refuses the
+   * connection - an answer that could not be obtained is not a yes.
+   */
+  const authenticate = typeof options.authenticate === 'function' ? options.authenticate : null;
 
   /**
    * The open read API and the firehose.
@@ -329,30 +370,165 @@ export function createEulerChat(options = {}) {
     send(socket, { type: 'unread', counts: notifications.counts(userId) });
   };
 
-  wss.on('connection', (socket) => {
+  /**
+   * Which person a claim belongs to, for as long as that person is here.
+   *
+   * A claim is the one thing about a connection that outlasts it: a key it has
+   * shown it holds, or an account the host vouched for. Two connections making
+   * the same claim are the same person - one member of a room, one vote - and
+   * somebody coming back within their minute of grace is recognised by what
+   * they can show rather than by an id they happen to remember.
+   */
+  const bound = new Map();
+  const claimsOf = new Map();
+
+  const holderOf = (claim) => {
+    const userId = bound.get(claim);
+    return userId && world.profiles.has(userId) ? userId : null;
+  };
+  const bind = (claim, userId) => {
+    bound.set(claim, userId);
+    let claims = claimsOf.get(userId);
+    if (!claims) claimsOf.set(userId, (claims = new Set()));
+    claims.add(claim);
+  };
+  /** Somebody has gone for good, and what they claimed goes with them. */
+  const retire = (userId) => {
+    for (const claim of claimsOf.get(userId) ?? []) bound.delete(claim);
+    claimsOf.delete(userId);
+    world.removeUser(userId);
+  };
+  /** They were on their way out, and have come back in time. */
+  const reclaim = (userId) => {
+    const pending = orphans.get(userId);
+    if (pending === undefined) return;
+    clearTimeout(pending);
+    orphans.delete(userId);
+  };
+
+  /**
+   * One connection, from the moment it is known who - if anybody - the host
+   * says it is. Returns what hears its frames.
+   */
+  const begin = (socket, account) => {
     const sessionId = crypto.randomUUID().slice(0, 8);
-    let userId = world.addUser(`guest-${sessionId.slice(0, 4)}`);
+    const vouched = account?.id != null ? `account:${account.id}` : null;
+
+    let userId =
+      (vouched && holderOf(vouched)) ||
+      world.addUser(account?.name ?? `guest-${sessionId.slice(0, 4)}`);
+    if (vouched) bind(vouched, userId);
+    reclaim(userId);
+
     const session = sessions.open(sessionId, userId, socket);
+    session.account = account;
+    // The key this connection has claimed, and whether it has shown it holds
+    // it. Everything that gives a key any standing reads `proven`, not `keyId`.
+    session.keyId = '';
+    session.publicKey = null;
+    session.proven = false;
 
     socket.alive = true;
     socket.on('pong', () => {
       socket.alive = true;
     });
 
-    // An EventEmitter with no 'error' listener rethrows, so a single client with
-    // a reset connection would take the process down and every other person in
-    // every other room with it. `ws` requires this listener; without it the
-    // server is one bad network away from stopping.
-    socket.on('error', () => {
-      // Nothing to do but let it close — 'close' always follows.
+    /** Them, as they are told about themselves: the profile, and their key if shown. */
+    const you = () => ({
+      ...world.profiles.get(userId),
+      keyId: session.proven ? session.keyId : undefined,
     });
 
-    send(socket, {
-      type: 'welcome',
-      you: { id: userId, name: world.profiles.get(userId).name },
-      maxArity: 3,
-    });
-    send(socket, { type: 'history', rooms: world.historyFor(userId) });
+    /** Everything a connection needs on finding out who it is. */
+    const greet = () => {
+      send(socket, { type: 'welcome', you: you(), maxArity: 3 });
+      send(socket, { type: 'history', rooms: world.historyFor(userId) });
+    };
+
+    /**
+     * Stop being the guest made on arrival, and be somebody already here.
+     *
+     * Whatever the guest had joined in the meantime is carried over rather
+     * than lost: showing a key takes a round trip, and a join that arrives
+     * inside it was meant by the person, not by the placeholder.
+     */
+    const become = (existing) => {
+      const guest = userId;
+      if (existing === guest) return;
+      reclaim(existing);
+
+      for (const subject of world.subscription(guest)) {
+        try {
+          world.join(existing, subject);
+        } catch {
+          /* already holding as much as one person may; theirs stands */
+        }
+      }
+
+      userId = existing;
+      sessions.reassign(sessionId, existing);
+      if (!sessions.forUser(guest).length) retire(guest);
+
+      greet();
+      sendBacklog(socket, userId);
+      pushDiagrams();
+    };
+
+    /**
+     * Somebody says a key is theirs. Name it, remember it, and ask them to
+     * show it; see `lib/proof.js` for why saying so is not enough.
+     *
+     * The fingerprint is computed here and whatever the client called it is
+     * ignored: a name that is supposed to follow from a key should not be
+     * taken from the person presenting the key.
+     */
+    const claimKey = async (offered) => {
+      try {
+        const publicKey = { kty: 'EC', crv: 'P-256', x: String(offered?.x ?? ''), y: String(offered?.y ?? '') };
+        const keyId = await fingerprint(publicKey);
+        const asked = await challenge(publicKey); // throws for a point not on the curve
+        if (session.proven) return; // two claims raced, and the other one won
+
+        session.publicKey = publicKey;
+        session.keyId = keyId;
+        session.challenge = asked;
+
+        for (const other of sessions) {
+          if (other === session) continue;
+          send(other.socket, { type: 'key', keyId: session.keyId, publicKey: session.publicKey });
+          send(session.socket, { type: 'key', keyId: other.keyId, publicKey: other.publicKey });
+        }
+        send(socket, { type: 'challenge', keyId, offer: asked.offer });
+      } catch {
+        send(socket, { type: 'error', message: 'that is not a key this place can use' });
+      }
+    };
+
+    const showKey = async (mac) => {
+      const asked = session.challenge;
+      session.challenge = null;
+      if (!asked || !(await asked.check(mac))) {
+        return send(socket, { type: 'error', message: 'that did not show the key is yours' });
+      }
+      if (socket.readyState !== socket.OPEN) return;
+      session.proven = true;
+
+      // An account already says who this is; the key is then only something
+      // to write beside the name. Otherwise the key is the whole of who they
+      // are, and whoever else is here holding it is the same person.
+      const held = `key:${session.keyId}`;
+      const existing = vouched ? null : holderOf(held);
+      if (existing && existing !== userId) {
+        send(socket, { type: 'proven', keyId: session.keyId });
+        become(existing);
+        return;
+      }
+      if (!vouched) bind(held, userId);
+      send(socket, { type: 'proven', keyId: session.keyId });
+      send(socket, { type: 'welcome', you: you(), maxArity: 3 });
+    };
+
+    greet();
     pushDiagrams();
 
     /**
@@ -372,9 +548,9 @@ export function createEulerChat(options = {}) {
       bucket.tokens -= cost;
       return true;
     };
-    const PRICE = { createSubject: 10, atlas: 8, overview: 6, post: 2, search: 1, join: 1, leave: 1, funnel: 2, keys: 3, readers: 2, record: 1, report: 4, concerns: 3, concern: 2, clear: 2, vote: 1, forget: 2, restore: 6 };
+    const PRICE = { createSubject: 10, atlas: 8, overview: 6, post: 2, search: 1, join: 1, leave: 1, funnel: 2, keys: 3, proof: 3, readers: 2, record: 1, report: 4, concerns: 3, concern: 2, clear: 2, vote: 1, forget: 2, restore: 6 };
 
-    socket.on('message', (raw) => {
+    const hear = (raw) => {
       let msg;
       try {
         msg = JSON.parse(raw);
@@ -390,30 +566,22 @@ export function createEulerChat(options = {}) {
         switch (msg.type) {
           case 'resume': {
             const claimed = String(msg.userId ?? '');
-            const pending = orphans.get(claimed);
-            if (!pending) {
-              // Grace expired or never theirs; they stay the guest they are.
+            // Grace expired or never theirs; they stay the guest they are. And
+            // the same answer for somebody who was more than an id: an id is
+            // printed on every message they posted, so knowing it shows
+            // nothing, and a person with a key or an account is taken back by
+            // showing the key or being vouched for again - never by this.
+            if (!orphans.has(claimed) || claimsOf.has(claimed)) {
               send(socket, { type: 'expired' });
               break;
             }
-            clearTimeout(pending);
-            orphans.delete(claimed);
-
-            world.removeUser(userId); // discard the guest made a moment ago
-            userId = claimed;
-            sessions.reassign(sessionId, claimed);
-
-            send(socket, { type: 'welcome', you: { ...world.profiles.get(userId) }, maxArity: 3 });
-            send(socket, { type: 'history', rooms: world.historyFor(userId) });
-            sendBacklog(socket, userId);
-            pushDiagrams();
+            become(claimed);
             break;
           }
 
           case 'identify': {
-            const profile = world.profiles.get(userId);
-            profile.name = String(msg.name ?? '').slice(0, 40) || profile.name;
-            send(socket, { type: 'welcome', you: { ...profile }, maxArity: 3 });
+            world.rename(userId, msg.name);
+            send(socket, { type: 'welcome', you: you(), maxArity: 3 });
             break;
           }
 
@@ -435,13 +603,20 @@ export function createEulerChat(options = {}) {
             // relays these and holds no private key of anybody's — but it does
             // decide whose keys go in the list, which is the limit of what
             // this protects against and is said plainly in the interface.
-            session.publicKey = msg.publicKey ?? null;
-            session.keyId = String(msg.keyId ?? '');
-            for (const other of sessions) {
-              if (other === session) continue;
-              send(other.socket, { type: 'key', keyId: session.keyId, publicKey: session.publicKey });
-              send(session.socket, { type: 'key', keyId: other.keyId, publicKey: other.publicKey });
+            //
+            // One key to a connection, once shown. Somebody who wants to be a
+            // different key wants to be a different person, and that is a new
+            // connection rather than a second claim on this one.
+            if (session.proven) {
+              send(socket, { type: 'error', message: 'this connection already has a key' });
+              break;
             }
+            void claimKey(msg.publicKey);
+            break;
+          }
+
+          case 'proof': {
+            void showKey(msg.mac);
             break;
           }
 
@@ -618,6 +793,8 @@ export function createEulerChat(options = {}) {
             const message = world.post(userId, msg.tags ?? [], msg.body, {
               envelope: msg.envelope ?? null,
               replyTo: msg.replyTo ?? null,
+              // Written beside their name, and only ever a key they have shown.
+              authorKey: session.proven ? session.keyId : null,
             });
             // Only people with a connection open can be sent anything, so the
             // audience search is narrowed to them rather than to every member.
@@ -634,16 +811,22 @@ export function createEulerChat(options = {}) {
       } catch (err) {
         send(socket, { type: 'error', message: err.message });
       }
-    });
+    };
+    socket.on('message', hear);
 
     socket.on('close', () => {
       sessions.close(sessionId);
       if (closed) return; // shutting down; nobody is coming back to reclaim it
 
       const leaving = userId;
+      // Another tab, or their phone: one of their connections has gone and
+      // they have not. Starting the clock here would remove somebody from
+      // every room a minute later, while they sat reading in the other window.
+      if (sessions.forUser(leaving).length) return;
+
       const timer = setTimeout(() => {
         orphans.delete(leaving);
-        world.removeUser(leaving);
+        retire(leaving);
         pushDiagrams();
       }, GRACE_MS);
       // Somebody's minute of grace is not a reason to keep a process running.
@@ -651,6 +834,57 @@ export function createEulerChat(options = {}) {
       orphans.set(leaving, timer);
       pushDiagrams();
     });
+
+    return hear;
+  };
+
+  /**
+   * How many frames are held for a connection the host has not answered for
+   * yet. A client says a handful of things on arrival; one that says a great
+   * many before it has been let in is not one to keep a list for.
+   */
+  const EARLY_MOST = 32;
+
+  wss.on('connection', (socket, req) => {
+    // An EventEmitter with no 'error' listener rethrows, so a single client with
+    // a reset connection would take the process down and every other person in
+    // every other room with it. `ws` requires this listener; without it the
+    // server is one bad network away from stopping.
+    socket.on('error', () => {
+      // Nothing to do but let it close — 'close' always follows.
+    });
+
+    if (!authenticate) {
+      begin(socket, null);
+      return;
+    }
+
+    // The host may need to look somebody up, and frames do not wait for it:
+    // a client says who it is the moment the socket opens. They are held and
+    // replayed rather than dropped, because a dropped first frame is a client
+    // that waits for ever for an answer to a question nobody heard.
+    const early = [];
+    const hold = (raw) => {
+      if (early.length < EARLY_MOST) early.push(raw);
+    };
+    socket.on('message', hold);
+
+    Promise.resolve()
+      .then(() => authenticate(req))
+      .then(
+        (account) => {
+          socket.off('message', hold);
+          if (socket.readyState !== socket.OPEN) return;
+          const hear = begin(socket, account && typeof account === 'object' ? account : null);
+          for (const raw of early) hear(raw);
+        },
+        (err) => {
+          // Somebody else's function, and the safe direction for an answer
+          // that could not be obtained is no.
+          console.error('eulerchat: authenticate threw, refusing the connection —', err?.message ?? err);
+          socket.close(1008, 'not allowed');
+        },
+      );
   });
 
   return {

@@ -55,10 +55,28 @@ if (wantsLedger) {
 if (interests > 0) populate(world, { subjects: interests, users: flag('people', 4000) });
 else seed(world);
 
+/**
+ * Who may read reports, by the key they hold.
+ *
+ * `--moderator <fingerprint>`, as many times as there are moderators, or
+ * `EULERCHAT_MODERATORS` with commas between them. The fingerprint is the one
+ * the interface shows a person for their own key, in full. Nobody by default:
+ * there are no accounts here, so a key is the only thing anybody can be
+ * recognised by, and it counts only once the connection has shown it holds it.
+ */
+const moderators = (process.env.EULERCHAT_MODERATORS ?? '').split(',');
+for (const [i, arg] of process.argv.entries()) {
+  if (arg === '--moderator' && process.argv[i + 1]) moderators.push(process.argv[i + 1]);
+}
+
 // This server is the public one: it is the deployment that decided everything
 // said here is readable by anybody. A library consumer gets the opposite
 // default and has to ask for it.
-const chat = createEulerChat({ world, publicApi: true });
+const chat = createEulerChat({
+  world,
+  publicApi: true,
+  moderators: moderators.map((m) => m.trim()).filter(Boolean),
+});
 
 /**
  * Say why, on the way down.

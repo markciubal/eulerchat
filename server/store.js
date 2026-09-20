@@ -37,6 +37,23 @@ const EMPTY = new Set();
 const now = () => Date.now();
 const id = () => crypto.randomUUID().slice(0, 8);
 
+/**
+ * A name, without the one thing a name may not contain.
+ *
+ * A key is written after a name as `wren` then a dot then eight characters,
+ * and it is drawn separately so that text cannot pass for it. That is not
+ * quite enough: somebody with no key at all, calling themselves `wren` dot
+ * `3fA9xQ2k`, would read at a glance as the person who holds that key. So the
+ * dot, and the other dots that look like it, are not available in names.
+ * Written as codepoints so that this file does not depend on anybody's editor
+ * telling seven near-identical characters apart.
+ */
+const DOTS = [0x00b7, 0x2022, 0x2027, 0x2219, 0x22c5, 0x30fb, 0xff65]
+  .map((c) => String.fromCodePoint(c))
+  .join('');
+const DOT = new RegExp(`[${DOTS}]`, 'g');
+const nameFrom = (name) => String(name ?? '').replace(DOT, '').trim().slice(0, 40);
+
 /** Bounds the cubic term in `census`; see `join`. */
 export const MAX_SUBSCRIPTIONS = 32;
 
@@ -152,10 +169,19 @@ export class World {
   addUser(name) {
     const userId = id();
     // No census change either: they hold nothing yet.
-    this.profiles.set(userId, { id: userId, name: String(name).slice(0, 40) || 'anon' });
+    this.profiles.set(userId, { id: userId, name: nameFrom(name) || 'anon' });
     this.members.set(userId, new Set());
     return userId;
   }
+
+  /** Change what somebody is called. An unusable name leaves the old one. */
+  rename(userId, name) {
+    const profile = this.profiles.get(userId);
+    if (!profile) return null;
+    profile.name = nameFrom(name) || profile.name;
+    return profile.name;
+  }
+
 
   subscription(userId) {
     return this.members.get(userId) ?? new Set();
@@ -851,6 +877,17 @@ export class World {
       message.envelope = raw.envelope ?? null;
     }
     if (raw.replyTo) message.replyTo = raw.replyTo;
+    // Which form it claims to be named by, and the key it claims was beside
+    // the name. Both are claims, and both are in the hash: say the wrong form,
+    // or a different key, and the result is a hash the server never wrote.
+    //
+    // The key is only taken together with the second form. The first form
+    // does not cover it, so a first-form copy carrying a key would be a
+    // genuine message with an unchecked signature stuck on.
+    if (raw.v === 2) {
+      message.v = 2;
+      if (raw.authorKey) message.authorKey = String(raw.authorKey);
+    }
     return message;
   }
 
@@ -1011,6 +1048,9 @@ export class World {
       message: {
         author: message.author,
         authorId: message.authorId,
+        // The one part of "who said it" that means anything a day later: the
+        // id above was made for a connection and goes when it does.
+        authorKey: message.authorKey ?? null,
         at: message.at,
         sealed: Boolean(message.sealed),
         body: message.sealed ? disclosed : message.body,
@@ -1141,15 +1181,26 @@ export class World {
     }
 
     const roomKey = key(room);
+    const profile = this.profiles.get(userId);
     const message = {
+      // Which form of commitment names this message; see `lib/receipt.js`.
+      v: 2,
       id: id(),
       room: roomKey,
       subjects: room,
-      author: this.profiles.get(userId)?.name ?? 'anon',
+      author: profile?.name ?? 'anon',
       authorId: userId,
       body: text.slice(0, 2000),
       at: now(),
     };
+
+    // The key written beside the name. For one that has been SHOWN to belong
+    // to whoever is posting - `challenge` in `lib/proof.js` is how - and for
+    // nothing else: the only reason it means anything to a reader is that
+    // nobody gets one by asking. The world cannot check, because it holds no
+    // connections; whoever passes this is vouching. Absent rather than empty
+    // otherwise, so that "no key" is one thing to test for and not two.
+    if (options.authorKey) message.authorKey = String(options.authorKey);
 
     // Replying to something. Held as an id plus enough of the original to
     // show, because the thing being replied to may be deleted before this is
