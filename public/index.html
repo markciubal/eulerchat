@@ -22,12 +22,11 @@
 
     <main>
       <section class="map" aria-label="subject diagram">
-        <div class="views" role="tablist">
-          <span class="tab" data-help="map"><button id="view-map" type="button" class="view on" role="tab">map</button></span>
-          <span class="tab" data-help="atlas"><button id="view-atlas" type="button" class="view" role="tab">atlas</button></span>
-          <button id="refit" type="button" class="view" title="show my interests again" hidden>back to my interests</button>
+        <div class="views">
+          <span class="tab" data-help="atlas"><strong class="view-name">the map</strong></span>
+          <button id="refit" type="button" class="view" title="show my interests again">back to my interests</button>
           <output id="zoom-note" class="zoom-note"></output>
-          <label id="atlas-size" class="atlas-size" hidden>
+          <label id="atlas-size" class="atlas-size">
             <span data-help="subjects">subjects</span>
             <input type="range" id="subject-count" min="3" max="10" value="5" />
             <output id="subject-count-out">5</output>

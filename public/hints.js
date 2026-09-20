@@ -21,25 +21,16 @@
  * one in ten who wants to know why.
  */
 export const HELP = {
-  map: {
+  atlas: {
     title: 'The map',
     short:
-      'Each circle is a subject people are here to talk about. Where two circles cross, ' +
+      'Each shape is an interest people are here to talk about. Where two shapes overlap, ' +
       'the part where they cross is its own conversation, for the people interested in both.',
     more:
-      'Click anywhere inside a circle to open that conversation. Click where two circles ' +
-      'overlap and you get the conversation for people who like both things, which is ' +
-      'usually the more interesting one. Bigger circles have more people in them.',
-  },
-  atlas: {
-    title: 'The atlas',
-    short:
-      'The same idea as the map, but it fits more subjects on at once and the shapes are ' +
-      'drawn to fit rather than being circles.',
-    more:
-      'The map keeps things simple by showing you three subjects at a time. The atlas ' +
-      'shows five or more, so you can see how a whole corner of the place fits together. ' +
-      'Scroll to zoom in, drag to move around, and press "fit" to get back.',
+      'Bigger shapes have more people in them, and so do bigger overlaps. Click anywhere ' +
+      'to open the conversation for that spot. Scroll to zoom in — the labels write ' +
+      'themselves out in full once there is room — drag to move around, and press ' +
+      '"back to my interests" to return.',
   },
   rooms: {
     title: 'The conversations',

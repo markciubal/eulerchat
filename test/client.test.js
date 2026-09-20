@@ -91,15 +91,29 @@ test('the client loads against the real page without throwing', async () => {
       { type: 'history', rooms: {} },
       { type: 'unread', counts: { 'art+philosophy': 3 } },
       {
-        type: 'diagram',
-        circles: [{ id: 'art', population: 4, x: 0, y: 0, r: 30 }],
-        bounds: { minX: -30, minY: -30, maxX: 30, maxY: 30, width: 60, height: 60 },
-        rooms: [{ key: 'art', subjects: ['art'], population: 4, member: true, messages: 0 }],
-        fit: { regions: [], phantoms: [], worst: null, worstError: 0, faithful: true, drawable: true },
+        type: 'state',
         subscription: ['art'],
-        suggested: [],
-        hidden: [],
+        funnel: 0,
         rail: { held: ['art'], suggested: [], popular: [], total: 1 },
+      },
+      {
+        // The picture, which is where the conversations come from now.
+        type: 'atlas',
+        subjects: ['art'],
+        extent: 1000,
+        zones: [{ key: 'art', subjects: ['art'], population: 4, x: 0, y: 0, room: 60, seed: { x: 0, y: 0 } }],
+        curves: [
+          {
+            subject: 'art',
+            components: 1,
+            anchor: { x: 0, y: 0, room: 60 },
+            loops: [[[-60, -60], [60, -60], [60, 60], [-60, 60]]],
+          },
+        ],
+        network: [],
+        report: { exact: true, phantoms: 0, vanished: 0, worstError: 0, disconnected: [], worstSplit: 1, wellFormed: true },
+        subscription: ['art'],
+        rooms: [{ key: 'art', subjects: ['art'], population: 4, here: 4, member: true, messages: 0, stats: { messages: 0, perMinute: 0, last: null } }],
       },
       {
         type: 'notification',
@@ -130,7 +144,7 @@ test('the client loads against the real page without throwing', async () => {
 
     // The unread badge should have made it onto the room chip.
     const chips = document.querySelectorAll('.room-chip');
-    assert.ok(chips.length > 0, 'rooms should be listed after a diagram');
+    assert.ok(chips.length > 0, 'conversations should be listed once the picture arrives');
 
     // And the client should have asked for the whole map, then drawn it.
     const asked = socket.sent.map((p) => JSON.parse(p).type);

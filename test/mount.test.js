@@ -80,7 +80,7 @@ test('it can live under a path', async () => {
   try {
     assert.equal((await get(port, '/')).body, 'host home', 'the root is still theirs');
     assert.match((await get(port, '/chat/')).body, /<title>eulerchat<\/title>/);
-    assert.match((await get(port, '/chat/public/app.js')).body, /renderDiagram/);
+    assert.match((await get(port, '/chat/public/app.js')).body, /renderAtlas/);
     assert.match((await get(port, '/chat/lib/regions.js')).body, /Region algebra/);
 
     // And the socket comes up at the mount point.
@@ -127,7 +127,7 @@ test('the client can be left out entirely', async () => {
   try {
     assert.equal((await get(port, '/')).status, 404);
 
-    const { seen, got } = await awaitFrame(`ws://127.0.0.1:${port}`, 'diagram');
+    const { seen, got } = await awaitFrame(`ws://127.0.0.1:${port}`, 'state');
     assert.ok(got, `but the rooms should still work; frames: ${seen.join(', ') || 'none'}`);
   } finally {
     chat.close();

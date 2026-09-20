@@ -751,3 +751,8 @@ input:disabled {
 .zone-label text {
   cursor: pointer;
 }
+
+.view-name {
+  font-size: 13px;
+  color: var(--ink);
+}

@@ -417,6 +417,23 @@ export class World {
   }
 
   /**
+   * What a person needs to know, without drawing anything.
+   *
+   * The interface used to carry two pictures and this pushed a solved circle
+   * layout to every session on every change to feed one of them. With only the
+   * atlas left, that layout went to nobody — so this is the same information
+   * minus the geometry, and the atlas is asked for when it is actually wanted.
+   */
+  stateFor(userId) {
+    const { held, suggested } = this.context(userId);
+    return {
+      subscription: [...held].sort(),
+      funnel: this.funnel(userId),
+      rail: this.rail(held, suggested),
+    };
+  }
+
+  /**
    * The atlas: many subjects at once, drawn with routed boundaries.
    *
    * A different bargain from `diagramFor`. That one is a live surface and is

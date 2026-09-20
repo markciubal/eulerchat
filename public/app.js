@@ -1,4 +1,4 @@
-import { renderDiagram, regionAt, scopeOf, stroke, regionFill } from './diagram.js';
+import { stroke, regionFill } from './diagram.js';
 import { renderAtlas, zoneAt, paintAtlas, relabel } from './atlasview.js';
 import { fitTo, pointsOf, renderMinimap } from './minimap.js';
 import { attachHelp, busyness, createCard, when } from './hints.js';
@@ -12,11 +12,9 @@ const state = {
   history: {},
   selected: null,
   hovered: null,
-  fills: new Map(),
   results: null,
   unread: {},
   missed: [],
-  view: 'map', // 'map' is the live circle surface; 'atlas' is a routed snapshot
   atlas: null,
   territories: new Map(),
   atlasSize: 5,
@@ -92,16 +90,15 @@ function handleFrame(evt) {
       // The old session is gone; carry on as the fresh guest we already are.
       break;
 
-    case 'diagram':
+    case 'state':
       state.diagram = msg;
       // The atlas is grown from the whole population, so a membership change
       // stales it. Drop it rather than show something a join has already
       // outdated; it regrows on request.
-      if (state.atlas) {
-        state.atlas = null;
-        if (state.view === 'atlas') send({ type: 'atlas', subjects: state.atlasSize });
-      }
-      if (state.view === 'map') draw();
+      // Grown from the whole population, so a membership change stales it; ask
+      // for a fresh one rather than show one a join has already outdated.
+      state.atlas = null;
+      send({ type: 'atlas', subjects: state.atlasSize });
       renderRail();
       renderRoom();
       if (!state.overview) send({ type: 'overview' });
@@ -122,7 +119,7 @@ function handleFrame(evt) {
 
     case 'atlas':
       state.atlas = msg;
-      if (state.view === 'atlas') drawAtlas();
+      drawAtlas();
       break;
 
     case 'overview':
@@ -182,58 +179,14 @@ function notify(text) {
   if (text) setTimeout(() => (node.hidden = true), 4000);
 }
 
-// --- diagram --------------------------------------------------------------
-
-function draw() {
-  const { fit, hidden } = state.diagram;
-  ({ fills: state.fills } = renderDiagram(svg, state.diagram));
-
-  renderRooms();
-
-  if (!state.diagram.circles.length) {
-    $('fit').textContent = 'no subjects yet — add one on the right.';
-    return;
-  }
-  paintSelection();
-
-  // The diagram says how far it can be trusted. With three circles some error
-  // is unavoidable, so name it rather than imply the areas are exact.
-  // Lead with what is here, not with how well it was drawn. The accuracy of
-  // the drawing was the only explanation on the page, it worried people, and
-  // there is nothing they can do about it — it lives behind the (i) now.
-  const rooms = state.diagram.rooms ?? [];
-  const mine = rooms.filter((r) => r.member).length;
-  const people = state.diagram.circles?.[0]?.population ?? 0;
-  const summary =
-    `${rooms.length} ${rooms.length === 1 ? 'conversation' : 'conversations'} here` +
-    (mine ? ` · you are in ${mine}` : people ? ' · join an interest to take part' : '');
-
-  const worst = fit.worst;
-  const ghost = fit.phantoms?.[0];
-  $('fit').textContent = summary;
-  $('fit').classList.remove('flag');
-  $('fit-note').textContent = !fit.drawable
-    ? 'Showing more than three at once, so the sizes here are approximate.'
-    : ghost
-      ? // Worse than a mis-sized room: somewhere to go that is not there. Said
-        // as a fact about people, because that is what it is, and counting the
-        // subjects rather than assuming three — it said "these three" over a
-        // list of two.
-        `nobody here is interested in ${ghost.subjects.join(' and ')} together, so that middle patch is empty`
-      : fit.faithful || !worst
-        ? ''
-        : 'Sizes here are within a few per cent.';
-
-  const note = $('hidden');
-  note.hidden = !hidden?.length;
-  if (hidden?.length) note.textContent = `not shown: ${hidden.join(', ')}`;
-}
+// --- the map ---------------------------------------------------------------
 
 /**
- * Open a room, and stop it nagging.
+ * Open a conversation, and stop it nagging.
  *
- * Reading a room is better than being told about it, so the server is told
- * where they are looking — that room stops interrupting and its badge clears.
+ * Reading a conversation is better than being told about it, so the server is
+ * told where they are looking — that one stops interrupting and its badge
+ * clears.
  */
 function select(room) {
   state.selected = room;
@@ -262,8 +215,8 @@ function announce(note) {
 }
 
 /** Whichever view is showing decides which rooms are on offer. */
-const currentRooms = () =>
-  (state.view === 'atlas' ? state.atlas?.rooms : state.diagram?.rooms) ?? [];
+/** There is one picture now, and its zones are the conversations. */
+const currentRooms = () => state.atlas?.rooms ?? [];
 
 /**
  * Every room in view, listed, with anything waiting in it.
@@ -427,14 +380,14 @@ function zoomAt(clientX, clientY, factor) {
 }
 
 svg.addEventListener('wheel', (evt) => {
-  if (state.view !== 'atlas' || !state.viewBox) return;
+  if (!state.viewBox) return;
   evt.preventDefault();
   zoomAt(evt.clientX, evt.clientY, evt.deltaY < 0 ? 1.18 : 1 / 1.18);
 }, { passive: false });
 
 let dragging = null;
 svg.addEventListener('pointerdown', (evt) => {
-  if (state.view !== 'atlas' || !state.viewBox) return;
+  if (!state.viewBox) return;
   dragging = { x: evt.clientX, y: evt.clientY, moved: 0 };
   svg.setPointerCapture?.(evt.pointerId);
 });
@@ -458,28 +411,8 @@ const endDrag = () => {
 svg.addEventListener('pointerup', endDrag);
 svg.addEventListener('pointercancel', endDrag);
 
-$('refit').addEventListener('click', () => {
-  if (state.view === 'atlas') drawAtlas();
-});
+$('refit').addEventListener('click', () => drawAtlas());
 
-function showView(which) {
-  state.view = which;
-  $('view-map').classList.toggle('on', which === 'map');
-  $('view-atlas').classList.toggle('on', which === 'atlas');
-  $('atlas-size').hidden = which !== 'atlas';
-  $('refit').hidden = which !== 'atlas';
-  svg.classList.toggle('atlas-mode', which === 'atlas');
-
-  if (which === 'atlas') {
-    if (!state.atlas) send({ type: 'atlas', subjects: state.atlasSize });
-    drawAtlas();
-  } else if (state.diagram) {
-    draw();
-  }
-}
-
-$('view-map').addEventListener('click', () => showView('map'));
-$('view-atlas').addEventListener('click', () => showView('atlas'));
 
 $('subject-count').addEventListener('input', (evt) => {
   state.atlasSize = Number(evt.target.value);
@@ -487,21 +420,9 @@ $('subject-count').addEventListener('input', (evt) => {
 });
 $('subject-count').addEventListener('change', () => {
   state.atlas = null;
-  $('fit').textContent = 'growing the atlas…';
+  $('fit').textContent = 'redrawing…';
   send({ type: 'atlas', subjects: state.atlasSize });
 });
-
-function paintSelection() {
-  // Lit area = the audience. Selecting `art` lights the whole art circle,
-  // because that is who a post to art reaches.
-  const scope = scopeOf([...state.fills.keys()], state.selected);
-
-  for (const [roomKey, node] of state.fills) {
-    const lit = scope.has(roomKey);
-    const hovered = roomKey === state.hovered;
-    node.setAttribute('opacity', lit ? 0.42 : hovered ? 0.3 : 0.14);
-  }
-}
 
 function pointFrom(evt) {
   const ctm = svg.getScreenCTM();
@@ -512,22 +433,16 @@ function pointFrom(evt) {
 function hit(evt) {
   const pt = pointFrom(evt);
   if (!pt) return null;
-  return state.view === 'atlas'
-    ? zoneAt(state.atlas?.curves ?? [], pt.x, pt.y)
-    : regionAt(state.diagram?.circles ?? [], pt.x, pt.y);
+  return zoneAt(state.atlas?.curves ?? [], pt.x, pt.y);
 }
 
-const repaint = () =>
-  state.view === 'atlas'
-    ? paintAtlas(state.territories, state.selected)
-    : paintSelection();
+const repaint = () => paintAtlas(state.territories, state.selected);
 
 svg.addEventListener('pointermove', (evt) => {
   const at = hit(evt);
   if (at !== state.hovered) {
     state.hovered = at;
-    if (state.view !== 'atlas') paintSelection();
-
+  
     // Hovering a patch of the picture asks the same question a chip does.
     const room = currentRooms().find((r) => r.key === at);
     if (room) card.room(room, { getBoundingClientRect: () => ({
@@ -704,9 +619,15 @@ function group(list, title) {
  * neighbourhood instead of a world.
  */
 function renderRail() {
-  const { rail, subscription, circles } = state.diagram;
+  const { rail, subscription } = state.diagram;
   const held = new Set(subscription);
-  const population = new Map(circles.map((c) => [c.id, c.population]));
+  // Counts come from the picture now rather than from a circle layout, and the
+  // rail is drawn before the picture arrives, so it must manage without them.
+  const population = new Map(
+    (state.atlas?.zones ?? [])
+      .filter((zone) => zone.subjects.length === 1)
+      .map((zone) => [zone.subjects[0], zone.population]),
+  );
   const list = $('subjects');
   list.textContent = '';
 

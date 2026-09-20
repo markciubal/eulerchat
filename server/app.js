@@ -185,7 +185,7 @@ export function createEulerChat(options = {}) {
       const signature = world.viewSignature(session.userId);
       if (signature === session.lastView) continue;
       session.lastView = signature;
-      send(session.socket, { type: 'diagram', ...world.diagramFor(session.userId) });
+      send(session.socket, { type: 'state', ...world.stateFor(session.userId) });
     }
   };
 
