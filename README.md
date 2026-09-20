@@ -205,12 +205,63 @@ rooms over your own transport, and building an atlas.
 | `eulerchat/knowledge` | a small default hierarchy |
 | `eulerchat/mold` | `Mold`, `weave` — what grows between them |
 | `eulerchat/abbrev` | `shortLabels`, `abbreviate` — naming the overlaps |
+| `eulerchat/seal` | `identity`, `seal`, `unseal` — a key per message |
 | `eulerchat/knowledge` | the bundled hierarchy, and `subfields()` |
 | `eulerchat/adapt` | `fromRows` — read the tables you already have |
 | `eulerchat/embed` | `mountMap`, `viewFor` — the map in an element you own |
 | `eulerchat/react` | `<EulerMap />` |
 | `eulerchat/app` | `createEulerChat` |
 | `eulerchat/store` | `World`, `seed` |
+
+
+## Sealing, and what sealing is not
+
+A message can be locked before it leaves the browser. Each one gets its own
+AES-GCM key, used once and thrown away; that key is wrapped separately for
+every reader through an ECDH agreement with their public key. The server holds
+a ciphertext and a bag of wrapped keys it cannot open. One key recovered costs
+one message rather than a conversation. Standard primitives throughout — P-256,
+HKDF, AES-GCM, through the platform's own `crypto.subtle`.
+
+```js
+import { identity, seal, unseal } from 'eulerchat/seal';
+
+const me = await identity();
+const you = await identity();
+const stranger = await identity();
+
+const envelope = await seal('meet by the mycology circle', me, [you.publicKey]);
+await unseal(envelope, you);       // 'meet by the mycology circle'
+await unseal(envelope, stranger);  // null — not an error, just not for them
+```
+
+The server keeps messages for twelve hours and then forgets them, on a sweep
+rather than on request, so that forgetting does not depend on anybody
+remembering to ask. Anyone who wants a lasting copy can turn one on; it is kept
+by their own browser and it is theirs alone.
+
+**What this does not do**, which matters more than what it does:
+
+- **It does not stop the people in the room keeping a record.** They are handed
+  the words — that is what sending is — and nothing here can tell, let alone
+  prevent it. Anyone can hold a stream in their own device's memory whatever
+  anybody else has set. Deleting the server's copy deletes the server's copy.
+- **It does not authenticate anybody.** The server decides which public keys
+  belong to a room, so a dishonest one can add a key of its own and be handed a
+  wrapped key like any other member. This protects a conversation from a server
+  that stores and later leaks, not from one that is actively against you.
+  Defending against that needs people to compare keys by some route the server
+  does not control, which is not built.
+- **It does not hide who is talking to whom**, or when, or how often. The server
+  routes, so the server knows.
+
+All three are said in the interface too, in those words. A product that
+implies more privacy than it delivers is worse than one that offers none,
+because people choose what to say based on what they think is true.
+
+If a message cannot be locked — no reader list, keys not made yet, the server
+unreachable — it is **not sent**. It stays in the box and says why. A request to
+encrypt that cannot be honoured has to fail rather than quietly do the opposite.
 
 
 ## The two decisions everything else follows from
