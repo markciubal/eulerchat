@@ -88,6 +88,7 @@ export function renderAtlas(svg, view) {
       x: curve.anchor.x,
       y: curve.anchor.y,
       class: `atlas-label${held.has(curve.subject) ? ' mine' : ''}`,
+      'data-subject': cssId(curve.subject),
     });
     label.textContent = curve.subject;
     // A subject in two pieces is drawn in two pieces; say so rather than
@@ -102,6 +103,8 @@ export function renderAtlas(svg, view) {
   // music, philosophy and math, each shortened only as far as it can be
   // without becoming ambiguous among what is on screen.
   const labels = shortLabels(curves.map((c) => c.subject));
+  const written = [];
+
   for (const zone of view.zones ?? []) {
     if (zone.subjects.length < 2) continue;
 
@@ -117,9 +120,59 @@ export function renderAtlas(svg, view) {
     spot.append(title, text);
     spot.dataset.full = full;
     svg.append(spot);
+
+    written.push({
+      text,
+      short: abbreviate(zone.subjects, labels),
+      long: zone.subjects.join(' ∩ '),
+      room: zone.room ?? 0,
+      size: 15,
+    });
   }
 
-  return { territories, labels };
+  for (const curve of curves) {
+    written.push({
+      text: svg.querySelector(`text[data-subject="${cssId(curve.subject)}"]`),
+      short: curve.subject,
+      long: curve.subject,
+      room: curve.anchor.room ?? 0,
+      size: 20,
+    });
+  }
+
+  return { territories, labels, written: written.filter((w) => w.text) };
+}
+
+/**
+ * Spell the labels out as far as they will go at this zoom.
+ *
+ * The short forms exist only because the full names do not fit where subjects
+ * meet — so once there is room for the real thing, the real thing is what
+ * should be there. Two parts to that. Text has to hold a constant size on
+ * screen, which means its size in map units has to shrink as the map grows
+ * under it; and then it fits, or it does not, against the room the zone
+ * actually has — which the layout worked out when it decided where to put the
+ * label and now hands over.
+ *
+ * `getComputedTextLength` is the honest measure and only a browser has it, so
+ * headlessly this estimates instead. The estimate is only ever used to decide
+ * between two spellings of the same thing.
+ */
+export function relabel(written, scale) {
+  for (const label of written) {
+    const size = label.size / Math.max(scale, 1e-6);
+    label.text.setAttribute('font-size', size.toFixed(2));
+
+    const widthOf = (value) => {
+      label.text.textContent = value;
+      const measured = label.text.getComputedTextLength?.();
+      return Number.isFinite(measured) && measured > 0 ? measured : value.length * size * 0.55;
+    };
+
+    // Room is a radius; a label laid across the middle of it has twice that.
+    const fits = label.long !== label.short && widthOf(label.long) <= label.room * 1.9;
+    label.text.textContent = fits ? label.long : label.short;
+  }
 }
 
 /**

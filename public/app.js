@@ -1,5 +1,5 @@
 import { renderDiagram, regionAt, scopeOf, stroke, regionFill } from './diagram.js';
-import { renderAtlas, zoneAt, paintAtlas } from './atlasview.js';
+import { renderAtlas, zoneAt, paintAtlas, relabel } from './atlasview.js';
 import { fitTo, pointsOf, renderMinimap } from './minimap.js';
 
 const $ = (id) => document.getElementById(id);
@@ -19,6 +19,8 @@ const state = {
   atlas: null,
   territories: new Map(),
   atlasSize: 5,
+  written: [],
+  viewBox: null,
   overview: null,
   FIT_PADDING: 20,
 };
@@ -297,7 +299,7 @@ function drawAtlas() {
     return;
   }
 
-  ({ territories: state.territories } = renderAtlas(svg, view));
+  ({ territories: state.territories, written: state.written } = renderAtlas(svg, view));
 
   // The native tooltip says it too, but only after a pause; this says it at
   // once, which is what makes the shortened labels feel readable rather than
@@ -314,7 +316,9 @@ function drawAtlas() {
   // found. Everything else is still there to pan to; this only decides where
   // the view starts.
   const own = pointsOf(view.curves, view.subscription ?? []);
-  fitTo(svg, own.length ? own : pointsOf(view.curves), state.FIT_PADDING);
+  state.viewBox = fitTo(svg, own.length ? own : pointsOf(view.curves), state.FIT_PADDING);
+  state.fitted = state.viewBox?.width;
+  applyView();
 
   paintAtlas(state.territories, state.selected);
   renderRooms();
@@ -350,6 +354,82 @@ function drawMinimap() {
     : `${total.toLocaleString()} subjects · join one to find your place`;
   void frame;
 }
+
+/**
+ * Pan and zoom the atlas.
+ *
+ * The map is bigger than a screenful the moment it is worth looking at, and a
+ * fixed frame makes the shortened labels permanent — which was only ever a
+ * concession to there not being room.
+ */
+function applyView() {
+  if (!state.viewBox) return;
+  const { x, y, width, height } = state.viewBox;
+  svg.setAttribute('viewBox', `${x} ${y} ${width} ${height}`);
+
+  const box = svg.getBoundingClientRect();
+  const scale = (box.width || 600) / width;
+  relabel(state.written, scale);
+  $('zoom-note').textContent = scale > 0 ? `${scale.toFixed(2)}×` : '';
+}
+
+const LIMITS = { in: 60, out: 1.2 };
+
+function zoomAt(clientX, clientY, factor) {
+  if (!state.viewBox) return;
+  const box = svg.getBoundingClientRect();
+  const vb = state.viewBox;
+
+  // The point under the cursor stays under the cursor; anything else feels
+  // like the map getting away from you.
+  const fx = (clientX - box.left) / (box.width || 1);
+  const fy = (clientY - box.top) / (box.height || 1);
+  const ux = vb.x + fx * vb.width;
+  const uy = vb.y + fy * vb.height;
+
+  const base = state.fitted ?? vb.width;
+  const width = Math.min(base * LIMITS.out, Math.max(base / LIMITS.in, vb.width / factor));
+  const height = width * (vb.height / vb.width);
+
+  state.viewBox = { x: ux - fx * width, y: uy - fy * height, width, height };
+  applyView();
+}
+
+svg.addEventListener('wheel', (evt) => {
+  if (state.view !== 'atlas' || !state.viewBox) return;
+  evt.preventDefault();
+  zoomAt(evt.clientX, evt.clientY, evt.deltaY < 0 ? 1.18 : 1 / 1.18);
+}, { passive: false });
+
+let dragging = null;
+svg.addEventListener('pointerdown', (evt) => {
+  if (state.view !== 'atlas' || !state.viewBox) return;
+  dragging = { x: evt.clientX, y: evt.clientY, moved: 0 };
+  svg.setPointerCapture?.(evt.pointerId);
+});
+
+svg.addEventListener('pointermove', (evt) => {
+  if (!dragging || !state.viewBox) return;
+  const box = svg.getBoundingClientRect();
+  const dx = ((evt.clientX - dragging.x) / (box.width || 1)) * state.viewBox.width;
+  const dy = ((evt.clientY - dragging.y) / (box.height || 1)) * state.viewBox.height;
+
+  dragging.moved += Math.abs(dx) + Math.abs(dy);
+  dragging.x = evt.clientX;
+  dragging.y = evt.clientY;
+  state.viewBox = { ...state.viewBox, x: state.viewBox.x - dx, y: state.viewBox.y - dy };
+  applyView();
+});
+
+const endDrag = () => {
+  dragging = null;
+};
+svg.addEventListener('pointerup', endDrag);
+svg.addEventListener('pointercancel', endDrag);
+
+$('refit').addEventListener('click', () => {
+  if (state.view === 'atlas') drawAtlas();
+});
 
 function showView(which) {
   state.view = which;
@@ -425,6 +505,8 @@ svg.addEventListener('pointerleave', () => {
 });
 
 svg.addEventListener('click', (evt) => {
+  // A drag across the map is not a choice of room.
+  if (dragging?.moved > 4) return;
   const at = hit(evt);
   if (!at) {
     notify('that point is outside every subject — there is no room there.');

@@ -84,7 +84,10 @@ function applyStyles(svg) {
       'stroke-width': 3.5,
       'stroke-linejoin': 'round',
     })) {
-      text.setAttribute(prop, String(value));
+      // Never over a size the caller already worked out; relabel sets font-size
+      // to hold a constant size on screen, and stamping 15 over it renders the
+      // overlap labels at whatever the zoom happens to make of 15 map units.
+      if (!text.hasAttribute(prop)) text.setAttribute(prop, String(value));
     }
   }
 }
@@ -272,4 +275,46 @@ function doc(node) {
     frame.setAttribute('stroke-dasharray', '18 12');
   }
   rasterise(svg, path.join(OUT, 'minimap.png'), `minimap (${wide.overview().subjects.length} subjects)`);
+}
+
+// --- zoom ------------------------------------------------------------------
+
+{
+  const { relabel } = await import('../public/atlasview.js');
+  const { fitTo } = await import('../public/minimap.js');
+  const { radialLayout, anchorsFor } = await import('../lib/taxonomy.js');
+  const { knowledge } = await import('../lib/knowledge.js');
+  const { zones } = await import('../lib/regions.js');
+  const { atlas } = await import('../lib/atlas.js');
+
+  const subjects = ['entomology', 'mycology', 'topology'];
+  const people = (n, s) => Array.from({ length: n }, () => new Set(s));
+  const view = atlas(
+    zones(
+      [
+        ...people(20, ['entomology']), ...people(16, ['mycology']), ...people(12, ['topology']),
+        ...people(8, ['entomology', 'mycology']), ...people(3, ['mycology', 'topology']),
+      ],
+      subjects,
+    ),
+    { anchors: anchorsFor(subjects, radialLayout(knowledge)) },
+  );
+
+  for (const [name, zoom] of [['zoom-out', 0.55], ['zoom-in', 1.6]]) {
+    const svg = blank();
+    svg.getBoundingClientRect = () => ({ width: SIZE, height: SIZE, left: 0, top: 0 });
+    const { written } = renderAtlas(svg, { ...view, subscription: [] });
+
+    const box = fitTo(svg, view.curves.flatMap((c) => c.loops.flat()), 20);
+    // Zoom about the middle, as the wheel does.
+    const width = box.width / zoom;
+    const height = box.height / zoom;
+    svg.setAttribute(
+      'viewBox',
+      `${box.x + (box.width - width) / 2} ${box.y + (box.height - height) / 2} ${width} ${height}`,
+    );
+    relabel(written, SIZE / width);
+
+    rasterise(svg, path.join(OUT, `${name}.png`), `atlas at ${zoom}x`);
+  }
 }

@@ -570,7 +570,17 @@ what is on screen:
 | amateur running, amateur go | `ar`, `ag` — a phrase gives its initials |
 
 So an overlap reads `mu + p + ma`, and hovering gives the full names and how
-many people are there. Labels sit at the deepest point of the zone's own
+many people are there.
+
+The atlas pans and zooms, and the short forms are not permanent: they exist
+only because the full names do not fit, so once there is room the real name is
+what appears. Two things make that work. Labels hold a constant size on
+*screen*, which means their size in map units shrinks as the map grows under
+them — without that they would scale with everything else and never fit any
+better. And "does it fit" is asked against the room the zone actually has,
+which the layout already worked out when it decided where to put the label:
+the distance transform that finds the deepest point knows how deep it is, and
+that depth is the radius of the largest circle the zone will hold. Labels sit at the deepest point of the zone's own
 ground rather than at the seed it grew from, which after growth can be
 somewhere else entirely.
 

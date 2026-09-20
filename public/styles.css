@@ -598,3 +598,19 @@ input:disabled {
   background: var(--bg);
   color: var(--ink);
 }
+
+.zoom-note {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+}
+
+#diagram.atlas-mode {
+  cursor: grab;
+  touch-action: none;
+}
+
+#diagram.atlas-mode:active {
+  cursor: grabbing;
+}
