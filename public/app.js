@@ -39,7 +39,10 @@ const send = (payload) =>
  * resumable for a minute afterwards, so a blink should cost nothing.
  */
 function connect() {
-  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
+  // Follow the page rather than assume the root: this may be mounted under a
+  // path on somebody else's server.
+  const at = (location.pathname ?? '/').replace(/\/$/, '') || '/';
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${at}`);
 
   ws.addEventListener('open', () => {
     backoff = 500;

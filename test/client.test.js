@@ -49,7 +49,7 @@ test('the client loads against the real page without throwing', async () => {
     document,
     window,
     WebSocket: FakeSocket,
-    location: { protocol: 'http:', host: 'localhost:8787' },
+    location: { protocol: 'http:', host: 'localhost:8787', pathname: '/' },
     sessionStorage: {
       getItem: () => null,
       setItem: () => {},
@@ -80,7 +80,8 @@ test('the client loads against the real page without throwing', async () => {
     await import(`../public/app.js?loaded=${Date.now()}`);
 
     assert.equal(sockets.length, 1, 'the client should open exactly one connection');
-    assert.match(sockets[0].url, /^ws:\/\/localhost:8787$/);
+    // The socket follows the page, so that this works mounted under a path.
+    assert.match(sockets[0].url, /^ws:\/\/localhost:8787\/$/);
 
     // And it should survive the frames a server actually sends on connect.
     const socket = sockets[0];

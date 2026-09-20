@@ -70,7 +70,8 @@
     "public",
     "README.md",
     "LICENSE",
-    "tools"
+    "tools",
+    "examples"
   ],
   "engines": {
     "node": ">=20"

@@ -1,4 +1,4 @@
-import type { Server } from 'node:http';
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { WebSocketServer } from 'ws';
 import type { Notification, NotifyPrefs, RegionKey } from '../lib/index.js';
 
@@ -87,6 +87,12 @@ export interface EulerChat {
   notifications: Notifications;
   server: Server;
   wss: WebSocketServer;
+  /**
+   * Serve the bundled client yourself — behind your own middleware, or from
+   * somewhere other than where this mounted it. Answers only for its own
+   * paths and returns without touching the response for anything else.
+   */
+  handleRequest(req: IncomingMessage, res: ServerResponse): void;
   close(): void;
 }
 
@@ -97,7 +103,10 @@ export interface EulerChat {
  */
 export function createEulerChat(options?: {
   world?: World;
+  /** Attach to a server you already have; omit to be handed an unbound one. */
   server?: Server;
+  /** Live under a path, e.g. `/chat`. Defaults to the root. */
+  mount?: string;
   sessions?: Sessions;
   notifications?: Notifications;
   /** Also serve the bundled browser client. */

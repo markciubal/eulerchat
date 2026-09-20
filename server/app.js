@@ -42,6 +42,9 @@ export { World, seed, populate, Sessions, Notifications };
 export function createEulerChat(options = {}) {
   const { world = seed(new World()), serveClient = true } = options;
   const server = options.server ?? http.createServer();
+  const ours = options.server === undefined;
+  // Where this lives on the host's server. '' means the root.
+  const mount = String(options.mount ?? '').replace(/\/+$/, '');
   // Connections live here rather than on the world; see server/sessions.js.
   const sessions = options.sessions ?? new Sessions();
   const notifications = options.notifications ?? new Notifications(world);
@@ -65,37 +68,87 @@ export function createEulerChat(options = {}) {
   };
 
 
+  /**
+   * Serve the bundled client — and nothing else.
+   *
+   * Attached to a server the host already owns, this used to answer every
+   * request that reached it, so a host route that had already replied got a
+   * second set of headers written over it and the process died of
+   * ERR_HTTP_HEADERS_SENT. A mounted library gets to answer for its own paths
+   * and must stay silent on everything else, so that the host's other
+   * listeners see the request untouched.
+   */
+  const cache = new Map();
+
   const handleRequest = (req, res) => {
+    if (res.headersSent || res.writableEnded) return;
+
     const url = new URL(req.url, `http://${req.headers.host}`);
+    if (mount && !url.pathname.startsWith(`${mount}/`) && url.pathname !== mount) return;
+    const rel = url.pathname.slice(mount.length) || '/';
 
-    // Client modules are served at the same relative depth they sit at on disk,
-    // so `../lib/regions.js` resolves the same way in the browser as it does in
-    // Node. The browser then runs the very same region algebra as the server —
-    // a second copy of the address format is a second copy that can drift.
-    const file =
-      url.pathname === '/'
-        ? path.join(publicDir, 'index.html')
-        : path.join(projectRoot, url.pathname.slice(1));
+    let file;
+    if (rel === '/') file = path.join(publicDir, 'index.html');
+    else if (rel.startsWith('/public/') || rel.startsWith('/lib/')) {
+      file = path.join(projectRoot, rel.slice(1));
+    } else {
+      return; // not ours to answer
+    }
 
+    // Client modules are served at the same relative depth they sit at on
+    // disk, so `../lib/regions.js` resolves the same way in the browser as it
+    // does in Node — the browser then runs the very same region algebra as the
+    // server, rather than a second copy of it that can drift.
     if (!file.startsWith(publicDir) && !file.startsWith(libDir)) {
       res.writeHead(403).end('forbidden');
       return;
     }
 
-    fs.readFile(file, (err, body) => {
-      if (err) {
-        res.writeHead(404, { 'content-type': 'text/plain' }).end('not found');
-        return;
+    // Synchronously, and deliberately. Reading asynchronously meant this
+    // returned without answering and without having answered — so any listener
+    // after it, including a host's catch-all 404, replied first and the file
+    // arrived to a response already sent. Deciding and answering in the same
+    // tick is what makes the ordering mean anything. These are a handful of
+    // small files and they are cached after the first read.
+    let body = cache.get(file);
+    if (body === undefined) {
+      try {
+        body = fs.readFileSync(file);
+      } catch {
+        body = null;
       }
-      res.writeHead(200, { 'content-type': MIME[path.extname(file)] ?? 'application/octet-stream' });
-      res.end(body);
-    });
+      cache.set(file, body);
+    }
+
+    if (body === null) {
+      res.writeHead(404, { 'content-type': 'text/plain' }).end('not found');
+      return;
+    }
+    res.writeHead(200, { 'content-type': MIME[path.extname(file)] ?? 'application/octet-stream' });
+    res.end(body);
   };
-  if (serveClient) server.on('request', handleRequest);
+
+  // Prepended, not appended. A host that ends its own routing with a catch-all
+  // 404 — which most do — would otherwise answer for these paths before this
+  // listener ever ran, and appending leaves no way for it to know that
+  // something later wants the request. Getting first refusal is safe precisely
+  // because this stays silent on anything that is not its own; a host wanting
+  // to wrap it in middleware of its own can pass `serveClient: false` and call
+  // `handleRequest` wherever it likes.
+  if (serveClient) server.prependListener('request', handleRequest);
+  // Only a server of our own gets a catch-all; on somebody else's, an
+  // unmatched path is their business.
+  if (ours) {
+    server.on('request', (req, res) => {
+      if (!res.headersSent && !res.writableEnded) res.writeHead(404).end('not found');
+    });
+  }
 
   // --- live -----------------------------------------------------------------
 
-  const wss = new WebSocketServer({ server });
+  // Only upgrades at our own mount point, so a host with its own socket
+  // server on the same port keeps it.
+  const wss = new WebSocketServer({ server, path: mount || '/' });
 
   // Same reasoning as the per-socket handler: an unheard 'error' on either of
   // these is an uncaught exception, and an uncaught exception is every room in
@@ -375,6 +428,8 @@ export function createEulerChat(options = {}) {
     world,
     sessions,
     notifications,
+    /** Serve the bundled client from wherever the host prefers. */
+    handleRequest,
     server,
     wss,
     close() {

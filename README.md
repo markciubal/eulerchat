@@ -145,6 +145,7 @@ import { createEulerChat, World, seed } from 'eulerchat/app';
 const chat = createEulerChat({
   world: seed(new World()),   // or your own, built with addSubject/addUser/join
   server: myHttpServer,       // attaches to yours; omit to get its own
+  mount: '/chat',             // lives under a path; omit for the root
   serveClient: true,          // also serve the bundled UI
 });
 
@@ -179,6 +180,16 @@ laptop — and `forUser`, `present` and `reaching` are all written for that.
 
 Importing this does not bind a port or read `process.argv`. The CLI
 (`npx eulerchat`) is a thin wrapper that adds those and a crash reporter.
+
+It answers for its own paths and stays silent on everything else, so your
+routes are untouched — and it takes first refusal on them, because a host that
+ends its routing with a catch-all 404 would otherwise reply before this ever
+ran. If you would rather place it yourself, behind your own middleware, pass
+`serveClient: false` and call `chat.handleRequest` wherever you like.
+
+There are four worked examples in `examples/`: drawing a diagram from set data
+with no server at all, adding the rooms to an app you already have, driving the
+rooms over your own transport, and building an atlas.
 
 ### Subpaths
 
