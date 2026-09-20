@@ -147,6 +147,8 @@ const chat = createEulerChat({
   server: myHttpServer,       // attaches to yours; omit to get its own
   mount: '/chat',             // lives under a path; omit for the root
   serveClient: true,          // also serve the bundled UI
+  publicApi: false,           // the default: no open read API unless asked for
+  isModerator: () => false,   // the default: nobody may read reports
 });
 
 chat.world;     // membership, messages, diagramFor(), atlasFor()
@@ -223,8 +225,21 @@ rooms over your own transport, and building an atlas.
 
 ## This place is public
 
-Everything said here in the clear is readable by anybody, without identifying
-themselves:
+**Off by default, and you have to ask for it.**
+
+```js
+createEulerChat({ world, server, publicApi: true });   // serves everything below
+```
+
+The bundled server (`npx eulerchat`) passes that flag, because it is the
+deployment that decided this place is public. A library consumer gets the
+opposite default: whoever installed this did not make that decision, and
+finding out about it when somebody scrapes them is not how they should.
+`chat.api.handleRequest` exists either way, for anybody placing it behind their
+own routing.
+
+With it on, everything said in the clear is readable by anybody, without
+identifying themselves:
 
 ```
 GET /api/rooms                  every room, with populations and message counts
@@ -260,8 +275,8 @@ Two things the open side deliberately does not serve:
   `isModerator`. Opening them should be a decision taken on purpose.
 
 Mounted on your own server the API answers its own endpoints and stays silent
-on everything else, so a host route at `/api/me` keeps working. Move it with
-`apiPath`, or switch it off with `publicApi: false`.
+on everything else, so a host route at `/api/me` keeps working. Move it out of
+the way with `apiPath`.
 
 
 ## Sealing, and what sealing is not

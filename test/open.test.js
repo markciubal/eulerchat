@@ -179,7 +179,7 @@ async function open() {
   const host = http.createServer((req, res) => {
     if (!res.headersSent) res.writeHead(404, { 'content-type': 'application/json' }).end('{}');
   });
-  const chat = createEulerChat({ world, server: host });
+  const chat = createEulerChat({ world, server: host, publicApi: true });
   const port = await listen(host);
   const get = async (path) => {
     const res = await fetch(`http://127.0.0.1:${port}${path}`, { signal: AbortSignal.timeout(5000) });
@@ -375,7 +375,7 @@ test('a vote reaches everybody in the room', async () => {
   const host = http.createServer((req, res) => {
     if (!res.headersSent) res.writeHead(404).end('{}');
   });
-  const chat = createEulerChat({ world, server: host });
+  const chat = createEulerChat({ world, server: host, publicApi: true });
   const port = await listen(host);
 
   const open = (url) => {
@@ -425,6 +425,29 @@ test('a vote reaches everybody in the room', async () => {
   } finally {
     author.close();
     voter.close();
+    chat.close();
+    host.close();
+  }
+});
+
+test('the open API is off until somebody asks for it', async () => {
+  // The default a library consumer gets. They did not decide this place is
+  // public; the person deploying it did, and they say so by passing the flag.
+  const host = http.createServer((req, res) => {
+    if (!res.headersSent) res.writeHead(404, { 'content-type': 'application/json' }).end('{}');
+  });
+  const chat = createEulerChat({ world: seed(new World()), server: host });
+  const port = await listen(host);
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/scrape`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    assert.equal(res.status, 404, 'nothing is served until publicApi is true');
+
+    // But it is still built, for anybody placing it behind their own routing.
+    assert.equal(typeof chat.api.handleRequest, 'function');
+  } finally {
     chat.close();
     host.close();
   }

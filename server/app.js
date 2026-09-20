@@ -80,7 +80,19 @@ export function createEulerChat(options = {}) {
    * what that decision costs and what it deliberately leaves out.
    */
   const api = createPublicApi(world, { mount, basePath: options.apiPath ?? '/api' });
-  if (options.publicApi !== false) server.prependListener('request', api.handleRequest);
+
+  // Off unless asked for, and that default is the important part.
+  //
+  // This serves every conversation to anybody who asks, which is the right
+  // thing for a place that has decided it is public and a disaster for
+  // somebody who mounted a chat library into their application and never read
+  // this far. The person who installed this did not make that decision, and
+  // would find out about it when somebody scraped them. So it is opt-in, and
+  // the bundled server opts in explicitly.
+  //
+  // `chat.api.handleRequest` is still there either way, for anybody who wants
+  // to place it behind their own middleware.
+  if (options.publicApi === true) server.prependListener('request', api.handleRequest);
 
   // Everything said, as it is said. Fed from the world's own watcher so that
   // nothing can reach a room without also reaching the stream - two separate

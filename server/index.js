@@ -55,7 +55,10 @@ if (wantsLedger) {
 if (interests > 0) populate(world, { subjects: interests, users: flag('people', 4000) });
 else seed(world);
 
-const chat = createEulerChat({ world });
+// This server is the public one: it is the deployment that decided everything
+// said here is readable by anybody. A library consumer gets the opposite
+// default and has to ask for it.
+const chat = createEulerChat({ world, publicApi: true });
 
 /**
  * Say why, on the way down.
