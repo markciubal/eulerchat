@@ -3,6 +3,8 @@ import { renderAtlas, zoneAt, paintAtlas, relabel } from './atlasview.js';
 import { fitTo, pointsOf, renderMinimap } from './minimap.js';
 import { attachHelp, busyness, createCard, when } from './hints.js';
 import { available, identity, seal, unseal } from '../lib/seal.js';
+import { REASONS } from '../lib/flag.js';
+import { plain, saidAbout } from '../lib/plain.js';
 
 const $ = (id) => document.getElementById(id);
 const svg = $('diagram');
@@ -19,11 +21,12 @@ const state = {
   atlas: null,
   territories: new Map(),
   atlasSize: 5,
-  me: null,
   keys: new Map(),
   sealing: false,
   recording: false,
   kept: [],
+  /** Messages this person has already reported, so the button can say so. */
+  reported: new Set(),
   written: [],
   viewBox: null,
   overview: null,
@@ -198,6 +201,13 @@ function handleFrame(evt) {
       state.readers = msg.readers ?? [];
       // Whoever asked for this list is waiting on it rather than on a timer.
       state.awaitingReaders?.(msg);
+      break;
+
+    case 'reported':
+      // Already reported is not a failure; it is the same answer as success
+      // from where the person is standing, and saying otherwise invites them
+      // to try again.
+      notify(msg.already ? 'You have already reported that one.' : 'Reported. Thank you.');
       break;
 
     case 'recording':
@@ -613,14 +623,55 @@ function renderRoom() {
     if (m.sealed) {
       const mark = document.createElement('span');
       mark.className = 'sealed-mark';
-      mark.textContent = '🔒 encrypted';
+      mark.textContent = 'encrypted';
       head.append(mark);
     }
+
+    // Reporting is the only thing that works on a sealed message — the server
+    // cannot read one, so nothing automatic will ever notice it. It belongs on
+    // every message that is not your own, quietly, where somebody who needs it
+    // will find it without it being the loudest thing in the room.
+    if (m.authorId !== state.me?.id) {
+      const flag = document.createElement('button');
+      flag.type = 'button';
+      flag.className = 'report';
+      flag.textContent = state.reported.has(m.id) ? 'reported' : 'report';
+      flag.disabled = state.reported.has(m.id);
+      flag.title = flag.disabled
+        ? 'You have reported this'
+        : 'Tell a moderator about this message';
+      flag.setAttribute('aria-label', `Report the message from ${m.author}`);
+      flag.addEventListener('click', () => askWhy(m, flag));
+      head.append(flag);
+    }
+
     li.append(head, text);
     log.append(li);
   }
   log.scrollTop = log.scrollHeight;
 }
+
+/**
+ * Take pictures out of the box as they arrive.
+ *
+ * On the way in rather than on the way out: somebody who types an emoji and
+ * watches it not appear has learned the rule in one go, whereas somebody whose
+ * message is quietly edited between pressing post and it appearing has been
+ * misquoted by their own chat client.
+ */
+$('body').addEventListener('input', (evt) => {
+  const box = evt.target;
+  const cleaned = plain(box.value);
+  if (!cleaned.changed) return;
+
+  // Trailing space is lost by trimming, and losing it mid-sentence makes the
+  // box feel broken while somebody is still typing.
+  const trailing = /\s$/.test(box.value) ? ' ' : '';
+  box.value = cleaned.text + trailing;
+  box.setSelectionRange(box.value.length, box.value.length);
+  const said = saidAbout(cleaned);
+  if (said) notify(said);
+});
 
 $('composer').addEventListener('submit', (evt) => {
   evt.preventDefault();
@@ -628,7 +679,11 @@ $('composer').addEventListener('submit', (evt) => {
   const body = $('body');
   if (!room || !body.value.trim()) return;
 
-  const text = body.value;
+  // Cleaned once more here, because this is the last point before the words
+  // leave - and for a sealed message it is the only point, since the server
+  // will never be able to look inside one.
+  const text = plain(body.value).text;
+  if (!text) return;
 
   // Only when they did not ask for it does plaintext go out on its own. The
   // two conditions used to be one `if`, so a message typed before the keys
@@ -686,6 +741,69 @@ $('composer').addEventListener('submit', (evt) => {
     if (body.value === text) body.value = '';
   })();
 });
+
+/**
+ * Ask what was wrong with a message, then report it.
+ *
+ * A reason is asked for rather than assumed, because "report" on its own tells
+ * a moderator nothing about what they are looking for, and because being made
+ * to pick one is a small moment of thought between irritation and a complaint.
+ *
+ * For an encrypted message this is also the moment of consent. The server has
+ * never been able to read it; the only way a moderator can see what was said
+ * is if the person reporting it chooses to show them. That is said before the
+ * choice, not after it.
+ */
+function askWhy(message, near) {
+  const panel = document.createElement('div');
+  panel.className = 'why';
+
+  const title = document.createElement('strong');
+  title.textContent = 'What is wrong with it?';
+  panel.append(title);
+
+  if (message.sealed) {
+    const warn = document.createElement('p');
+    warn.className = 'discloses';
+    warn.textContent =
+      'This message is encrypted, so nobody but the people here can read it. ' +
+      'Reporting it shows this one message to a moderator. The rest stay private.';
+    panel.append(warn);
+  }
+
+  const close = () => panel.remove();
+
+  for (const [reason, { says }] of Object.entries(REASONS)) {
+    const choice = document.createElement('button');
+    choice.type = 'button';
+    choice.className = 'why-choice';
+    choice.textContent = says;
+    choice.addEventListener('click', () => {
+      send({
+        type: 'report',
+        messageId: message.id,
+        reason,
+        // Only for a sealed one, and only because they just chose to.
+        disclosed: message.sealed ? message.body : undefined,
+      });
+      state.reported.add(message.id);
+      close();
+      renderRoom();
+      notify('Reported. A moderator will look at it; nobody in the room is told.');
+    });
+    panel.append(choice);
+  }
+
+  const never = document.createElement('button');
+  never.type = 'button';
+  never.className = 'why-cancel';
+  never.textContent = 'cancel';
+  never.addEventListener('click', close);
+  panel.append(never);
+
+  document.querySelector('.why')?.remove();
+  near.after(panel);
+}
 
 /**
  * Who is in a room, as a promise rather than as a guess about how long the

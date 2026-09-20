@@ -110,6 +110,18 @@ export const HELP = {
       'who wants a record of a conversation will have one whatever you or we set — so ' +
       'treat anything you say here as something that can be kept.',
   },
+  reporting: {
+    title: 'Reporting a message',
+    short:
+      'Every message somebody else wrote has a small "report" next to it. Use it if '
+      + 'something said here is abusive, threatening or otherwise wrong.',
+    more:
+      'You are asked what was wrong with it, which is what tells a moderator what to look '
+      + 'for. Nobody in the conversation is told that you reported it. If a message was '
+      + 'encrypted, reporting it shows that one message to a moderator and nothing else — '
+      + 'you are asked first, because otherwise nobody could see what you are complaining '
+      + 'about.',
+  },
   composer: {
     title: 'Writing here',
     short: 'Type and press post. Everyone in this conversation will see it.',

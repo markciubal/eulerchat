@@ -10,12 +10,17 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(here, '..', 'public');
 
 /**
- * The two promises the interface makes, tested against the code that makes them.
+ * The promises the interface makes, tested against the code that makes them.
  *
- * Both were broken, and neither was visible from anywhere else: the store was
- * right, the crypto was right, the frames over the wire were right, and the
- * browser still threw the record away and still sent plaintext. Nothing short
- * of loading the client and working it would have found either.
+ * Two of them were broken, and neither was visible from anywhere else: the
+ * store was right, the crypto was right, the frames over the wire were right,
+ * and the browser still threw the record away and still sent plaintext.
+ * Nothing short of loading the client and working it would have found either.
+ *
+ * The reporting ones are here for the same reason. Whether a person is asked
+ * before an encrypted message of theirs is shown to a moderator is not a fact
+ * about the server; it is a fact about what the browser does in the half
+ * second after they press a button.
  */
 
 /** Wait on a condition rather than on a guess about how long something takes. */
@@ -276,4 +281,121 @@ test('when the readers are there, the words go out locked and not otherwise', as
   // And the person it was sealed for can actually read it — a locked message
   // nobody can open would satisfy every assertion above and be useless.
   assert.equal(await unseal(post.envelope, reader), secret);
+});
+
+// --- reporting -------------------------------------------------------------
+
+/** A message as it arrives from the server, from somebody who is not you. */
+const from = (author, body, extra = {}) => ({
+  type: 'message',
+  message: {
+    id: extra.id ?? 'm1',
+    room: 'art',
+    subjects: ['art'],
+    author,
+    authorId: extra.authorId ?? 'someone-else',
+    body,
+    at: Date.now(),
+    ...extra,
+  },
+});
+
+/** Get into the room with a message in it, ready to be worked. */
+async function inRoom(client, message) {
+  arrive(client.emit);
+  client.emit(message);
+  client.document.querySelector('#rooms button')
+    .dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  return client.document.querySelector('#log .report');
+}
+
+test('there is a way to report somebody else, and not yourself', async () => {
+  const client = await loadClient();
+  await inRoom(client, from('hila', 'something unpleasant'));
+
+  const buttons = client.document.querySelectorAll('#log .report');
+  assert.equal(buttons.length, 1, 'their message can be reported');
+
+  // Your own cannot. A report button on your own words is a confusing offer
+  // at best and a way to waste a moderator's time at worst.
+  client.emit(from('you', 'my own words', { id: 'm2', authorId: 'u1' }));
+  client.document.querySelector('#rooms button')
+    .dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  assert.equal(client.document.querySelectorAll('#log .report').length, 1, 'still only theirs');
+});
+
+test('reporting asks what was wrong before it sends anything', async () => {
+  const client = await loadClient();
+  const button = await inRoom(client, from('hila', 'something unpleasant'));
+
+  button.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+
+  // Nothing has been sent yet — being asked is the point, both so a moderator
+  // knows what to look for and so there is a moment between irritation and a
+  // complaint.
+  assert.deepEqual(client.socket.sent.filter((f) => f.type === 'report'), []);
+
+  const panel = client.document.querySelector('.why');
+  assert.ok(panel, 'a panel asking why');
+  assert.ok(panel.querySelectorAll('.why-choice').length >= 5, 'with reasons to pick from');
+
+  // Pick one, and only then does it go.
+  panel.querySelector('.why-choice')
+    .dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+
+  const [sent] = client.socket.sent.filter((f) => f.type === 'report');
+  assert.equal(sent.messageId, 'm1');
+  assert.ok(sent.reason, 'with a reason attached');
+  assert.equal(sent.disclosed, undefined, 'an unencrypted message needs no disclosure');
+  assert.equal(client.document.querySelector('.why'), null, 'and the panel goes away');
+});
+
+test('reporting an encrypted message says so before it is shown to anybody', async () => {
+  const client = await loadClient();
+  // As it arrives once the browser has opened it: sealed, with the text the
+  // reader could decrypt.
+  const button = await inRoom(client, from('hila', 'what was actually said', { sealed: true }));
+
+  button.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  const panel = client.document.querySelector('.why');
+
+  // The consent moment. The server has never been able to read this message,
+  // so reporting it is the reader choosing to show it — and they have to be
+  // told that before they choose, not after.
+  const warning = panel.querySelector('.discloses');
+  assert.ok(warning, 'an encrypted message must say what reporting it does');
+  assert.match(warning.textContent, /encrypted/i);
+  assert.match(warning.textContent, /shows this one message/i);
+  assert.deepEqual(client.socket.sent.filter((f) => f.type === 'report'), [], 'and still nothing sent');
+
+  panel.querySelector('.why-choice')
+    .dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+
+  const [sent] = client.socket.sent.filter((f) => f.type === 'report');
+  assert.equal(sent.disclosed, 'what was actually said', 'now, and only now, the text goes');
+});
+
+test('a message already reported says so instead of offering again', async () => {
+  const client = await loadClient();
+  const button = await inRoom(client, from('hila', 'something unpleasant'));
+
+  button.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  client.document.querySelector('.why .why-choice')
+    .dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+
+  const after = client.document.querySelector('#log .report');
+  assert.equal(after.textContent, 'reported');
+  assert.equal(after.disabled, true);
+});
+
+test('cancelling reports nothing', async () => {
+  const client = await loadClient();
+  const button = await inRoom(client, from('hila', 'something unpleasant'));
+
+  button.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  client.document.querySelector('.why .why-cancel')
+    .dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+
+  assert.equal(client.document.querySelector('.why'), null);
+  assert.deepEqual(client.socket.sent.filter((f) => f.type === 'report'), []);
 });

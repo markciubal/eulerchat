@@ -15,6 +15,8 @@ import { layout } from '../lib/euler.js';
 import { atlas } from '../lib/atlas.js';
 import { anchorsFor, ancestorsOf, normalise, radialLayout, resolve } from '../lib/taxonomy.js';
 import { knowledge } from '../lib/knowledge.js';
+import { DEFAULT_WORDS, REASON_NAMES, rank, scan } from '../lib/flag.js';
+import { plain } from '../lib/plain.js';
 
 /** Computed once: where subjects sit before anybody has joined them. */
 const EXTENT = 1000;
@@ -41,6 +43,22 @@ export const MAX_SUBJECTS = 50_000;
  */
 export const KEEP_FOR = 12 * 60 * 60 * 1000;
 
+/**
+ * How long a report is kept, which is longer, and deliberately.
+ *
+ * This is the one exception to the twelve hours above, and it should be stated
+ * rather than discovered. A report is useless without the thing complained
+ * about, and a message reported at hour eleven would otherwise take its own
+ * evidence with it an hour later — so reporting a message copies it into the
+ * report, and that copy outlives the conversation.
+ *
+ * The exception is kept as narrow as it can be: only a message somebody
+ * actually reported, only that message, and only for as long as a moderator
+ * plausibly needs to look. Everything else in the room still goes at twelve
+ * hours. People are told this when they report.
+ */
+export const REPORTS_KEEP_FOR = 30 * 24 * 60 * 60 * 1000;
+
 /** Region populations, canonically ordered — identical censuses, identical string. */
 const censusSignature = (counts) =>
   [...counts]
@@ -59,6 +77,24 @@ export class World {
     /** subject -> who holds it. An inverted index; see `audienceFor`. */
     this._holders = new Map();
     /** @type {Set<(event: object) => void>} */ this._watchers = new Set();
+    /** roomKey -> reports about messages in it. See `report`. */
+    /** @type {Map<string, Array>} */ this.reports = new Map();
+    /** roomKey -> how many messages matched the word list; a hint, never a verdict. */
+    /** @type {Map<string, number>} */ this.flagged = new Map();
+    /** Rooms a moderator has looked at and judged fine, with when. */
+    /** @type {Map<string, {at: number, by: string}>} */ this.cleared = new Map();
+    /** Off unless an operator asks for it; see `watchWords`. */
+    this._words = null;
+    /**
+     * Reports go to their own listeners, not to `watch`.
+     *
+     * `watch` is what feeds people's notifications, and a report is
+     * confidential: who complained about whom is not something to put on the
+     * same wire as "somebody said your name", where one future `if` in the
+     * notification rules would hand it to the room. Two pipes, so that
+     * mistaking one for the other has to be deliberate.
+     */
+    /** @type {Set<(report: object) => void>} */ this._reportWatchers = new Set();
   }
 
   // --- catalogue & membership -------------------------------------------
@@ -604,7 +640,184 @@ export class World {
       if (keep.length) this.messages.set(roomKey, keep);
       else this.messages.delete(roomKey);
     }
+
+    // Reports go too, on their own longer clock. Sweeping them here rather
+    // than somewhere else means there is one answer to "when does the server
+    // forget", not two that can drift apart.
+    const reportCutoff = now - REPORTS_KEEP_FOR;
+    for (const [roomKey, list] of this.reports) {
+      const keep = list.filter((report) => report.at >= reportCutoff);
+      if (keep.length === list.length) continue;
+
+      dropped += list.length - keep.length;
+      if (keep.length) this.reports.set(roomKey, keep);
+      else {
+        this.reports.delete(roomKey);
+        this.flagged.delete(roomKey);
+      }
+    }
     return dropped;
+  }
+
+  // --- reports -----------------------------------------------------------
+
+  /**
+   * Turn on the word scanner, with whatever vocabulary the operator brings.
+   *
+   * Off by default. It cannot see sealed messages at all, it cannot tell a
+   * quotation from an insult, and in a place with channels for criminology and
+   * linguistics it will find the subject of the room. What it produces is a
+   * hint that somebody might look, which is why its contribution to a room's
+   * standing is capped. Passing nothing turns it off again.
+   */
+  watchWords(words = DEFAULT_WORDS) {
+    this._words = words ?? null;
+    return Boolean(this._words);
+  }
+
+  /**
+   * Somebody says a message is wrong.
+   *
+   * The report copies the message into itself, and that is worth being plain
+   * about: it is how the complaint survives the twelve hours, and it is the
+   * one place where saying something and it being forgotten come apart. The
+   * person reporting is told.
+   *
+   * For a sealed message the server has nothing to copy — it never could read
+   * it — so the reporter's own client sends the text it was able to decrypt.
+   * That is a person choosing to show a moderator something that was private,
+   * which is theirs to choose and nobody else's, and it is recorded as a
+   * disclosure rather than as something the server knew.
+   *
+   * @param {string} userId    who is reporting
+   * @param {string} messageId which message
+   * @param {string} reason    one of REASONS
+   * @param {{disclosed?: string, note?: string}} [options]
+   */
+  report(userId, messageId, reason, options = {}) {
+    if (!this.profiles.has(userId)) throw new Error('no such person');
+    const why = REASON_NAMES.includes(reason) ? reason : 'other';
+
+    const found = this.#findMessage(messageId);
+    if (!found) throw new Error('no such message, or it has already been forgotten');
+    const { message, roomKey } = found;
+
+    // You can only report what you could see. Otherwise anyone could complain
+    // about rooms they have never been in, which is a way of attacking a room
+    // rather than of moderating one.
+    if (!receives(this.subscription(userId), message.subjects)) {
+      throw new Error(`you are not in ${roomKey}`);
+    }
+    if (message.authorId === userId) throw new Error('you cannot report your own message');
+
+    const list = this.reports.get(roomKey) ?? [];
+    // One person, one message, one report. Pressing the button twice is not
+    // twice the evidence, and allowing it would make the count meaningless.
+    if (list.some((r) => r.by === userId && r.messageId === messageId)) {
+      return { already: true, room: roomKey };
+    }
+
+    const disclosed = message.sealed ? String(options.disclosed ?? '').slice(0, 2000) : '';
+    const report = {
+      id: id(),
+      messageId,
+      room: roomKey,
+      subjects: message.subjects,
+      by: userId,
+      reason: why,
+      note: String(options.note ?? '').slice(0, 500),
+      at: now(),
+      // The evidence, kept because the message itself will not be.
+      message: {
+        author: message.author,
+        authorId: message.authorId,
+        at: message.at,
+        sealed: Boolean(message.sealed),
+        body: message.sealed ? disclosed : message.body,
+        // Said explicitly so nobody later mistakes a reader's disclosure for
+        // something the server was able to read on its own.
+        disclosedByReporter: Boolean(message.sealed && disclosed),
+      },
+    };
+
+    list.push(report);
+    this.reports.set(roomKey, list);
+    // A room that was looked at and passed is being complained about again.
+    this.cleared.delete(roomKey);
+
+    for (const listener of this._reportWatchers) {
+      try {
+        listener(report);
+      } catch {
+        /* a moderation feed that throws must not stop the report being filed */
+      }
+    }
+    return { already: false, room: roomKey, report };
+  }
+
+  /** Told when somebody reports something. Not the same feed as `watch`. */
+  onReport(listener) {
+    this._reportWatchers.add(listener);
+    return () => this._reportWatchers.delete(listener);
+  }
+
+  /** The message with this id, wherever it is. */
+  #findMessage(messageId) {
+    for (const [roomKey, log] of this.messages) {
+      const message = log.find((m) => m.id === messageId);
+      if (message) return { message, roomKey };
+    }
+    return null;
+  }
+
+  /**
+   * Which rooms need a moderator's attention, worst first.
+   *
+   * The answer to the question that was asked — which channels, not which
+   * messages. See `lib/flag.js` for how reports become an order, and for why
+   * several different people count for more than several reports.
+   */
+  concerns({ now: at = now(), includeCleared = false } = {}) {
+    const rooms = [];
+    const keys = new Set([...this.reports.keys(), ...this.flagged.keys()]);
+
+    for (const roomKey of keys) {
+      if (!includeCleared && this.cleared.has(roomKey)) {
+        // Judged fine already, and nothing new since — see `report`, which
+        // undoes this the moment somebody complains again.
+        continue;
+      }
+      rooms.push({
+        room: roomKey,
+        subjects: parse(roomKey),
+        reports: this.reports.get(roomKey) ?? [],
+        messages: (this.messages.get(roomKey) ?? []).length,
+        flags: this.flagged.get(roomKey) ?? 0,
+        population: this.census().get(roomKey) ?? 0,
+      });
+    }
+
+    return rank(rooms, { now: at });
+  }
+
+  /** Everything held about one room, for somebody about to make a decision. */
+  concern(roomKey) {
+    const [entry] = this.concerns({ includeCleared: true }).filter((r) => r.room === roomKey);
+    if (!entry) return null;
+    return { ...entry, cleared: this.cleared.get(roomKey) ?? null, detail: this.reports.get(roomKey) ?? [] };
+  }
+
+  /**
+   * A moderator has looked and thinks the room is fine.
+   *
+   * It stops appearing until somebody reports it again, which is what stops a
+   * list of concerns from being a list of the same six rooms forever. The
+   * reports themselves are not deleted; a judgement is not evidence.
+   */
+  clear(roomKey, by = 'moderator') {
+    if (!this.reports.has(roomKey) && !this.flagged.has(roomKey)) return false;
+    this.cleared.set(roomKey, { at: now(), by });
+    return true;
   }
 
   /**
@@ -626,7 +839,15 @@ export class World {
 
   post(userId, tags, body, options = {}) {
     const room = canonical(tags);
-    const text = String(body ?? '').trim();
+    // Cleaned here as well as in the browser. The browser does it first and
+    // shows the result, so nobody is edited without seeing it; this is the
+    // backstop for everything that is not the browser, which is anything
+    // holding a socket open.
+    //
+    // A sealed message cannot be cleaned here at all - there is nothing
+    // readable to clean - so for those the rule lives entirely in the client.
+    const scrubbed = plain(body);
+    const text = scrubbed.text;
 
     if (!room.length) throw new Error('a message needs at least one subject');
     if (room.length > MAX_ARITY) throw new Error(`at most ${MAX_ARITY} subjects per room`);
@@ -664,6 +885,13 @@ export class World {
     log.push(message);
     if (log.length > 500) log.shift();
     this.messages.set(roomKey, log);
+
+    // If an operator asked for it, note that the words are worth a look. Only
+    // ever a count, and only for messages the server can actually read: a
+    // sealed one is opaque here and is left alone rather than guessed at.
+    if (this._words && !message.sealed && !scan(message.body, { words: this._words }).clean) {
+      this.flagged.set(roomKey, (this.flagged.get(roomKey) ?? 0) + 1);
+    }
 
     // How many this reaches is what decides whether it is worth interrupting
     // anyone for, and it is already known here.

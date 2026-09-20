@@ -774,3 +774,83 @@ input:disabled {
   color: var(--muted);
   margin-left: 5px;
 }
+
+/* --- reporting ---------------------------------------------------------- */
+
+/* Present on every message and loud on none of them. Somebody looking for it
+   finds it; nobody else is invited to think about moderation while reading. */
+.report {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  padding: 0 0.25rem;
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--muted, #8a8a8a);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+li:hover .report,
+.report:focus-visible,
+.report[disabled] {
+  opacity: 1;
+}
+.report:hover:not([disabled]) {
+  color: var(--warn, #b4472e);
+  text-decoration: underline;
+}
+.report[disabled] {
+  cursor: default;
+  font-style: italic;
+}
+
+.why {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  margin: 0.35rem 0 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--line, #d8d4cc);
+  border-radius: 6px;
+  background: var(--raised, #fbfaf7);
+  max-width: 22rem;
+}
+.why strong {
+  font-size: 0.82rem;
+  margin-bottom: 0.15rem;
+}
+/* The consent line before an encrypted message is shown to anybody. It is the
+   one thing in this panel that must be read, so it does not look like the
+   rest of it. */
+.why .discloses {
+  margin: 0 0 0.35rem;
+  font-size: 0.76rem;
+  line-height: 1.35;
+  color: var(--warn, #b4472e);
+}
+.why-choice {
+  border: 0;
+  background: none;
+  padding: 0.2rem 0;
+  font: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+.why-choice:hover,
+.why-choice:focus-visible {
+  text-decoration: underline;
+}
+.why-cancel {
+  margin-top: 0.25rem;
+  border: 0;
+  background: none;
+  padding: 0.2rem 0;
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--muted, #8a8a8a);
+  cursor: pointer;
+}

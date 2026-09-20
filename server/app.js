@@ -50,6 +50,26 @@ export function createEulerChat(options = {}) {
   const sessions = options.sessions ?? new Sessions();
   const notifications = options.notifications ?? new Notifications(world);
 
+  /**
+   * Who may look at reports. Nobody, unless the host says otherwise.
+   *
+   * Deliberately a question handed back rather than answered here. This
+   * package has no idea who your administrators are — it makes an anonymous
+   * user per connection — and a library that invented its own notion of an
+   * admin would either be ignored by anyone with real accounts or, worse,
+   * trusted by someone who assumed it meant something. The host knows; it can
+   * say.
+   *
+   *   createEulerChat({ isModerator: (userId, session) => session.staff === true })
+   *
+   * Defaulting to nobody means reports are collected and unreadable until
+   * somebody decides who should read them, which is the right way round: the
+   * failure is that moderation does not happen, not that it happens to the
+   * wrong person.
+   */
+  const isModerator =
+    typeof options.isModerator === 'function' ? options.isModerator : () => false;
+
   // A notification only counts as delivered if it reached a live connection;
   // otherwise it is kept for whenever they come back.
   notifications.onNotify((userId, note) => {
@@ -164,6 +184,23 @@ export function createEulerChat(options = {}) {
     socket.destroy();
     void err;
   });
+
+  /**
+   * Ask the host whether this person may see reports.
+   *
+   * Wrapped, because it is somebody else's function: one that throws should
+   * deny the request and leave the server standing, not take the process down
+   * with it. Denial is the safe direction for a predicate whose answer could
+   * not be obtained.
+   */
+  const allowedToModerate = (userId, session) => {
+    try {
+      return isModerator(userId, session) === true;
+    } catch (err) {
+      console.error('eulerchat: isModerator threw, treating as no —', err.message);
+      return false;
+    }
+  };
 
   const send = (socket, payload) => {
     // The readyState check loses a race with a socket closing underneath us, and
@@ -300,7 +337,7 @@ export function createEulerChat(options = {}) {
       bucket.tokens -= cost;
       return true;
     };
-    const PRICE = { createSubject: 10, atlas: 8, overview: 6, post: 2, search: 1, join: 1, leave: 1, funnel: 2, keys: 3, readers: 2, record: 1 };
+    const PRICE = { createSubject: 10, atlas: 8, overview: 6, post: 2, search: 1, join: 1, leave: 1, funnel: 2, keys: 3, readers: 2, record: 1, report: 4, concerns: 3, concern: 2, clear: 2 };
 
     socket.on('message', (raw) => {
       let msg;
@@ -370,6 +407,55 @@ export function createEulerChat(options = {}) {
               send(other.socket, { type: 'key', keyId: session.keyId, publicKey: session.publicKey });
               send(session.socket, { type: 'key', keyId: other.keyId, publicKey: other.publicKey });
             }
+            break;
+          }
+
+          case 'report': {
+            // Confidential in both directions: the answer goes to the person
+            // who sent it and to nobody else, and it says only that the report
+            // was filed. Telling a room that one of its messages was reported
+            // would identify the reporter by elimination in any room small
+            // enough to matter.
+            const outcome = world.report(
+              userId,
+              String(msg.messageId ?? ''),
+              String(msg.reason ?? 'other'),
+              { disclosed: msg.disclosed, note: msg.note },
+            );
+            send(socket, { type: 'reported', room: outcome.room, already: outcome.already });
+            break;
+          }
+
+          case 'concerns': {
+            // Answered rather than ignored. That moderation exists is in the
+            // README; who is trusted with it is what matters, and saying no
+            // reveals nothing about that — while silence would leave a host
+            // whose own predicate is wrong with nothing at all to go on.
+            if (!allowedToModerate(userId, session)) {
+              send(socket, { type: 'error', message: 'not allowed' });
+              break;
+            }
+            send(socket, { type: 'concerns', rooms: world.concerns() });
+            break;
+          }
+
+          case 'concern': {
+            if (!allowedToModerate(userId, session)) {
+              send(socket, { type: 'error', message: 'not allowed' });
+              break;
+            }
+            send(socket, { type: 'concern', detail: world.concern(String(msg.room ?? '')) });
+            break;
+          }
+
+          case 'clear': {
+            if (!allowedToModerate(userId, session)) {
+              send(socket, { type: 'error', message: 'not allowed' });
+              break;
+            }
+            const roomKey = String(msg.room ?? '');
+            world.clear(roomKey, world.profiles.get(userId)?.name ?? 'moderator');
+            send(socket, { type: 'concerns', rooms: world.concerns() });
             break;
           }
 
@@ -489,6 +575,20 @@ export function createEulerChat(options = {}) {
     world,
     sessions,
     notifications,
+    /**
+     * Reports, for a host that would rather read them from its own admin
+     * pages than over a socket. No permission check here — reaching this means
+     * you are already running the server, and a second opinion about whether
+     * the process may read its own memory would be theatre.
+     */
+    moderation: {
+      concerns: (options) => world.concerns(options),
+      concern: (roomKey) => world.concern(roomKey),
+      clear: (roomKey, by) => world.clear(roomKey, by),
+      onReport: (listener) => world.onReport(listener),
+      watchWords: (words) => world.watchWords(words),
+    },
+
     /** Serve the bundled client from wherever the host prefers. */
     handleRequest,
     server,

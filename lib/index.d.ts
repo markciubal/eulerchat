@@ -415,3 +415,81 @@ export function unseal(envelope: Envelope | null | undefined, me: Identity): Pro
 
 /** Whether this environment has the crypto the rest of this needs. */
 export function available(): boolean;
+
+// --- reports ---------------------------------------------------------------
+
+/** Why somebody reported something. */
+export type Reason = 'hate' | 'threat' | 'abuse' | 'sexual' | 'language' | 'spam' | 'other';
+
+export declare const REASONS: Record<Reason, { weight: number; says: string }>;
+export declare const REASON_NAMES: Reason[];
+
+/**
+ * The words the scanner knows by default: ordinary English profanity, and no
+ * slurs. What counts as a slur is specific to a community and a language, so
+ * that list belongs to whoever is running the place, not to a library.
+ */
+export declare const DEFAULT_WORDS: Record<string, string[]>;
+
+export interface Match {
+  /** The word, reduced to the form the list holds. */
+  word: string;
+  /** How it was actually written, before that. */
+  as: string;
+  category: string;
+}
+
+/**
+ * Look through a message for words an operator asked to know about.
+ *
+ * Whole words only, so `classic`, `Scunthorpe` and `shiitake` are left alone.
+ * It cannot see a sealed message — there is nothing to see — and it never
+ * returns a judgement, only what it matched.
+ */
+export function scan(text: string | null | undefined, options?: { words?: Record<string, string[]> }): {
+  found: Match[];
+  weight: number;
+  clean: boolean;
+};
+
+/** Compile `{category: [words]}` into the matcher `scan` uses. */
+export function vocabulary(words?: Record<string, string[]>): Map<string, string>;
+
+/** One room that needs looking at, and why. */
+export interface Concern {
+  room: RegionKey;
+  subjects: string[] | null;
+  /** 0..1, comparable between rooms. */
+  score: number;
+  level: 'watch' | 'look' | 'urgent';
+  /** How many different people reported it — the strongest signal here. */
+  reporters: number;
+  reports: number;
+  messages: number;
+  /** How many messages matched the word list. A hint, never a verdict. */
+  flags: number;
+  /** The heaviest reason anybody gave. */
+  worst: number;
+  reasons: Array<{ reason: Reason; count: number; says: string }>;
+  /** Why this room is on the list, in a sentence somebody can disagree with. */
+  why: string;
+  last: number;
+}
+
+/**
+ * Turn reports into an ordered answer to "which rooms need looking at".
+ *
+ * Measures concentration rather than volume, so a busy room is not top of the
+ * list merely for being busy, and weights several different people far above
+ * several reports from one — which is what a grudge looks like.
+ */
+export function rank(
+  rooms: Array<{
+    room: RegionKey;
+    subjects?: string[];
+    reports: Array<{ by: string; reason: Reason | string; at: number }>;
+    messages?: number;
+    flags?: number;
+  }>,
+  options?: { now?: number; window?: number },
+): Concern[];
