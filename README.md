@@ -206,12 +206,60 @@ rooms over your own transport, and building an atlas.
 | `eulerchat/mold` | `Mold`, `weave` — what grows between them |
 | `eulerchat/abbrev` | `shortLabels`, `abbreviate` — naming the overlaps |
 | `eulerchat/seal` | `identity`, `seal`, `unseal` — a key per message |
+| `eulerchat/plain` | `plain` — words only: no images, no emoji |
+| `eulerchat/cluster` | `newCluster`, `within`, `inviteLink` — small groups by name |
+| `eulerchat/receipt` | `verify`, `findDeletion` — checking what was deleted |
+| `eulerchat/flag` | `scan`, `rank`, `REASONS` — which rooms need looking at |
+| `eulerchat/public-api` | `createPublicApi` — the open read side and the firehose |
 | `eulerchat/knowledge` | the bundled hierarchy, and `subfields()` |
 | `eulerchat/adapt` | `fromRows` — read the tables you already have |
 | `eulerchat/embed` | `mountMap`, `viewFor` — the map in an element you own |
 | `eulerchat/react` | `<EulerMap />` |
 | `eulerchat/app` | `createEulerChat` |
 | `eulerchat/store` | `World`, `seed` |
+
+
+## This place is public
+
+Everything said here in the clear is readable by anybody, without identifying
+themselves:
+
+```
+GET /api/rooms                  every room, with populations and message counts
+GET /api/rooms/{key}/log        one room's messages     ?since=&limit=
+GET /api/scrape                 everything, resumable   ?since=&limit=
+GET /api/receipts               the record of deletions ?since=
+GET /api/firehose               a live stream of events (server-sent events)
+```
+
+The firehose is the same shape as BlueSky's: connect, and receive everything as
+it happens.
+
+```js
+const stream = new EventSource('http://localhost:8787/api/firehose');
+stream.addEventListener('message', (e) => console.log(JSON.parse(e.data)));
+```
+
+That openness is a decision about what this place *is*, and it has to be
+carried through the product rather than mentioned in a footnote. The interface
+says so above the composer, where nobody has to click anything to see it,
+because a private-feeling chat window in front of a public endpoint is a lie
+told by omission. If you fork this and close the API, change that line too.
+
+Two things the open side deliberately does not serve:
+
+- **Sealed messages, as text.** It serves the envelope. The server has no key
+  and never did, so there is nothing to withhold and nothing to reveal.
+  Encryption is the one thing that still protects anything here, which is
+  precisely why it stays.
+- **Reports.** They name the person who complained. A reporter identified to
+  the room they reported is a reporter who never reports again, which is a
+  different kind of harm from publishing a conversation. Those sit behind
+  `isModerator`. Opening them should be a decision taken on purpose.
+
+Mounted on your own server the API answers its own endpoints and stays silent
+on everything else, so a host route at `/api/me` keeps working. Move it with
+`apiPath`, or switch it off with `publicApi: false`.
 
 
 ## Sealing, and what sealing is not
@@ -237,7 +285,8 @@ await unseal(envelope, stranger);  // null — not an error, just not for them
 
 The server keeps messages for twelve hours and then forgets them, on a sweep
 rather than on request, so that forgetting does not depend on anybody
-remembering to ask. Anyone who wants a lasting copy can turn one on; it is kept
+remembering to ask. What it dropped is written into a chain anybody can check;
+see **What deletion can and cannot show**, below. Anyone who wants a lasting copy can turn one on; it is kept
 by their own browser and it is theirs alone.
 
 **What this does not do**, which matters more than what it does:
@@ -262,6 +311,90 @@ because people choose what to say based on what they think is true.
 If a message cannot be locked — no reader list, keys not made yet, the server
 unreachable — it is **not sent**. It stays in the box and says why. A request to
 encrypt that cannot be honoured has to fail rather than quietly do the opposite.
+
+
+## What deletion can and cannot show
+
+**Nobody can prove a deletion.** A server that copied your message elsewhere,
+or whose disk was imaged, or whose operator simply remembers, can publish a
+flawless receipt for a deletion that never happened. There is no cryptography
+for "and then I forgot", and the word *proof* is avoided here on purpose.
+
+What is here is narrower, and real. Every deletion is recorded, in order, each
+entry bound to the one before it by a hash:
+
+```js
+import { verify, findDeletion } from 'eulerchat/receipt';
+
+const { receipts } = await (await fetch('http://localhost:8787/api/receipts')).json();
+
+await verify(receipts);                // { ok: true, problems: [], head: '...' }
+await findDeletion(myCopy, receipts);  // { deleted: true, at: 1732..., reason: 'expired' }
+```
+
+So a server that says it deletes on a schedule and does not, or that goes back
+and edits its own history, can be caught. Messages are named by a hash of
+themselves rather than by their text, so the record can be published without
+republishing the conversations: only somebody already holding a message can
+recognise it there. Dishonesty becomes detectable rather than impossible, which
+is the most any log can do.
+
+You can also delete your own message at any time. It leaves the same trail.
+
+
+## Words only
+
+No images and no emoji, in messages or anywhere in the product.
+
+```js
+import { plain } from 'eulerchat/plain';
+
+plain('the chanterelles are up [an emoji here] <img src=x>');
+// { text: 'the chanterelles are up', emoji: 1, images: 1, changed: true }
+```
+
+Removal rather than refusal: losing a whole message because one character came
+off somebody's keyboard wrong is a worse outcome than dropping the character.
+The browser cleans the box as you type, so nobody is edited without watching it
+happen, and the server cleans again because a client is only a suggestion. A
+sealed message can only be cleaned in the browser, since the server cannot read
+one.
+
+The rule covers the interface too, and a test walks the whole source tree and
+fails if a pictograph appears anywhere in it. That is how the one I had put in
+a label was found.
+
+
+## Small groups, by name
+
+`kite-fox-9/art` is a different subject from `art`. That is the entire
+mechanism: containment already keeps the two apart, so nothing in the routing
+had to learn that groups exist.
+
+```js
+import { newCluster, within, inviteLink } from 'eulerchat/cluster';
+
+const group = newCluster();              // 'kite-fox-9'
+within(group, 'art');                    // 'kite-fox-9/art'
+inviteLink('https://example.com/', group);
+```
+
+Share the link, or the square beside it, which is drawn as a grid of elements
+rather than as a picture. **It is a door with a name, not a lock**: anyone who
+has the name can walk in, and anyone you share it with can share it onward.
+Right for the six people at your table; wrong for anything that would matter if
+a stranger read it. What is said inside is still public unless it is locked.
+
+
+## Votes
+
+One person, one vote. Pressing the same button again takes it back, and
+changing your mind replaces rather than adds.
+
+Nothing about votes feeds the report ranking, and that separation is
+load-bearing. A message plenty of people disagree with is not a message that
+broke a rule, and if the two were connected then organising a few friends would
+be the quickest way to get somebody moderated.
 
 
 ## The two decisions everything else follows from
