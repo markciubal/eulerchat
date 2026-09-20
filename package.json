@@ -42,6 +42,18 @@
     "./notify": {
       "types": "./lib/index.d.ts",
       "default": "./lib/notify.js"
+    },
+    "./taxonomy": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/taxonomy.js"
+    },
+    "./knowledge": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/knowledge.js"
+    },
+    "./mold": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/mold.js"
     }
   },
   "bin": {

@@ -13,6 +13,11 @@ import {
 } from '../lib/regions.js';
 import { layout } from '../lib/euler.js';
 import { atlas } from '../lib/atlas.js';
+import { anchorsFor, radialLayout } from '../lib/taxonomy.js';
+import { knowledge } from '../lib/knowledge.js';
+
+/** Computed once: where subjects sit before anybody has joined them. */
+const HIERARCHY = radialLayout(knowledge);
 
 const now = () => Date.now();
 const id = () => crypto.randomUUID().slice(0, 8);
@@ -357,7 +362,11 @@ export class World {
     const counts = this.census();
     const held = this.subscription(userId);
     const { subjects } = neighbourhood(counts, held, limit, this.index());
-    const view = atlas(zones([...this.members.values()], subjects));
+    // Anchored to the knowledge hierarchy, so the map keeps its shape as people
+    // come and go instead of rearranging itself around whoever is here now.
+    const view = atlas(zones([...this.members.values()], subjects), {
+      anchors: anchorsFor(subjects, this.hierarchy ?? HIERARCHY),
+    });
 
     return {
       ...view,

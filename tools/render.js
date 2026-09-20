@@ -20,6 +20,7 @@ import { populate } from '../server/populate.js';
 import { renderDiagram } from '../public/diagram.js';
 import { renderAtlas } from '../public/atlasview.js';
 
+const NS = 'http://www.w3.org/2000/svg';
 const OUT = process.argv[2] ?? path.join(process.cwd(), 'renders');
 const SIZE = 900;
 
@@ -149,4 +150,84 @@ for (const n of [5, 8]) {
   const view = awkward.diagramFor(watcher);
   renderDiagram(svg, view);
   rasterise(svg, path.join(OUT, 'map-phantom.png'), `circle map with a phantom (${view.fit.phantoms.length})`);
+}
+
+// --- the knowledge hierarchy and the mould --------------------------------
+
+{
+  const { radialLayout, anchorsFor } = await import('../lib/taxonomy.js');
+  const { knowledge } = await import('../lib/knowledge.js');
+  const { zones } = await import('../lib/regions.js');
+  const { atlas } = await import('../lib/atlas.js');
+
+  const positions = radialLayout(knowledge);
+  const subjects = ['painting', 'philosophy', 'jazz', 'chess', 'botany'];
+  const anchors = anchorsFor(subjects, positions);
+
+  const people = (n, s) => Array.from({ length: n }, () => new Set(s));
+  const crowd = [
+    ...people(20, ['painting']), ...people(16, ['philosophy']), ...people(14, ['jazz']),
+    ...people(12, ['chess']), ...people(10, ['botany']),
+    ...people(7, ['painting', 'philosophy']), ...people(5, ['jazz', 'painting']),
+    ...people(4, ['chess', 'botany']), ...people(3, ['philosophy', 'jazz']),
+  ];
+  const counts = zones(crowd, subjects);
+
+  {
+    const svg = blank();
+    renderAtlas(svg, { ...atlas(counts, { anchors }), subscription: [] });
+    rasterise(svg, path.join(OUT, 'atlas-anchored.png'), 'atlas, anchored to hierarchy');
+  }
+
+  const grown = atlas(counts, { anchors, mold: { generations: 140, agents: 2600 } });
+  {
+    const svg = blank();
+    renderAtlas(svg, { ...grown, subscription: [] });
+    rasterise(svg, path.join(OUT, 'atlas-mold.png'), 'atlas, grown along the mould');
+  }
+  console.log(`  mould joined: ${grown.network.map((e) => e.subjects.join('~')).join(', ')}`);
+
+  // And the trail field itself, so the network is visible rather than inferred.
+  {
+    const { weave } = await import('../lib/mold.js');
+    const weight = new Map(subjects.map((s) => [s, counts.get(s) ?? 1]));
+    const affinity = [...counts]
+      .filter(([k]) => k.includes('+'))
+      .map(([k, n]) => [...k.split('+'), n]);
+
+    const mould = weave({ anchors, weight, affinity, generations: 140, agents: 2600, extent: 1000 });
+    const field = mould.field();
+    const g = mould.grid;
+    const cell = 1000 / g;
+
+    const svg = blank();
+    svg.setAttribute('viewBox', '-500 -500 1000 1000');
+    for (let y = 0; y < g; y++) {
+      for (let x = 0; x < g; x++) {
+        const v = field[y * g + x];
+        if (v < 0.015) continue;
+        const r = doc(svg).createElementNS(NS, 'rect');
+        r.setAttribute('x', (x * cell - 500).toFixed(1));
+        r.setAttribute('y', (y * cell - 500).toFixed(1));
+        r.setAttribute('width', cell.toFixed(2));
+        r.setAttribute('height', cell.toFixed(2));
+        const shade = Math.pow(v, 0.4);
+        r.setAttribute('fill', `hsl(${188 - shade * 160} 72% ${92 - shade * 58}%)`);
+        svg.append(r);
+      }
+    }
+    for (const [name, at] of anchors) {
+      const t = doc(svg).createElementNS(NS, 'text');
+      t.setAttribute('x', at.x);
+      t.setAttribute('y', at.y);
+      t.setAttribute('class', 'atlas-label');
+      t.textContent = name;
+      svg.append(t);
+    }
+    rasterise(svg, path.join(OUT, 'mold-field.png'), 'the mould network itself');
+  }
+}
+
+function doc(node) {
+  return node.ownerDocument;
 }

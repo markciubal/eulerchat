@@ -190,6 +190,9 @@ Importing this does not bind a port or read `process.argv`. The CLI
 | `eulerchat/atlas` | routed layout: `atlas` |
 | `eulerchat/svg` | `toSVG` |
 | `eulerchat/notify` | `classify`, `mentions` — what is worth interrupting for |
+| `eulerchat/taxonomy` | `radialLayout`, `anchorsFor` — where subjects sit |
+| `eulerchat/knowledge` | a small default hierarchy |
+| `eulerchat/mold` | `Mold`, `weave` — what grows between them |
 | `eulerchat/app` | `createEulerChat` |
 | `eulerchat/store` | `World`, `seed` |
 
@@ -403,6 +406,77 @@ public/app.js     state and wiring
 
 `lib/` is served to the browser as well as imported by the server, so the
 client and server share one definition of what a region address is.
+
+## Where subjects sit, and what grows between them
+
+The atlas originally placed subjects by shared membership alone. That is
+honest about the community and useless as a map: topology and geometry are
+drawn as strangers until somebody happens to hold both, a brand new subject
+has no position at all, and every coordinate shifts as people come and go.
+
+Three layers now, each doing one job:
+
+| | decides | from |
+|---|---|---|
+| **taxonomy** | where subjects *sit* | a knowledge hierarchy, before anyone joins |
+| **mould** | which way the ground *runs* between them | agents, fed by who bridges what |
+| **quotas** | how much ground each zone *gets* | population — exactly, as before |
+
+Only the first two are new, and neither touches the third, which is why the
+map can take an organic shape without giving up the exactness the atlas exists
+for.
+
+### A hierarchy anchors the map
+
+```js
+import { radialLayout, anchorsFor, knowledge, atlas, zones } from 'eulerchat';
+
+const where = radialLayout(knowledge);          // or your own `child: parent`
+const anchors = anchorsFor(subjects, where);
+atlas(zones(people, subjects), { anchors });
+```
+
+Laid out radially — siblings adjacent, unrelated branches apart — and
+deterministic. Names it does not know are left unanchored and placed by
+co-membership as before; a facet like `modern jazz` resolves to `jazz`, so a
+real catalogue anchors without anyone curating every phrasing. Cycles are
+tolerated, because a hierarchy baked out of Wikipedia will have them.
+
+What this buys, measured by churning a population and seeing how far subjects
+move on a map 1000 units across:
+
+| | mean drift | worst |
+|---|---|---|
+| membership only | 444 | 589 |
+| anchored to a hierarchy | **40** | **68** |
+
+Eleven times steadier. That is the difference between a map that breathes and
+one that rearranges itself around whoever is currently online — the objection
+that made the atlas a snapshot rather than a surface.
+
+### A mould weaves the routes
+
+```js
+atlas(counts, { anchors, mold: true });   // or { mold: { generations, agents } }
+```
+
+Subjects are food; the people holding two subjects are the traffic between
+them. Agents shuttle along their own pair, deposit, sense and turn, and the
+field diffuses and decays — so the routes people actually bridge get trodden
+into existence and the rest fade. `atlas(...).network` reports what it joined.
+
+It is not free, and the defaults are not the textbook ones. With the values a
+general Physarum model uses, agents merge into a single mass governed by the
+geometry, and the network that emerges came out **anti-correlated** with the
+co-membership it was supposed to be tracing. Two things fix it: agents that
+keep their pair for good rather than merely starting on it, and connectivity
+measured by widest path rather than along the straight line between two
+subjects — a mould route bends by nature, and a chord probe scores a perfectly
+good curved channel at zero.
+
+Correlation between channel strength and people bridging a pair, across four
+populations, three never used for tuning: **0.69, 0.97, 0.42, 1.00**.
+
 
 ## Two views, two bargains
 

@@ -158,6 +158,8 @@ export interface Atlas {
   curves: Territory[];
   /** User units across the map; coordinates run -extent/2 .. +extent/2. */
   extent: number;
+  /** Which subjects the mould joined up, when one was run; otherwise empty. */
+  network: Array<{ subjects: string[]; strength: number }>;
   report: AtlasReport;
 }
 
@@ -169,6 +171,17 @@ export interface AtlasOptions {
   /** Rounds of corner-rounding on the outlines. */
   smooth?: number;
   extent?: number;
+  /**
+   * Where subjects sit before membership has any say — from `anchorsFor`.
+   * Without one, position is decided entirely by who holds what, and the map
+   * rearranges itself whenever the population changes.
+   */
+  anchors?: Map<string, { x: number; y: number }> | null;
+  /**
+   * Let a Physarum model decide which way the ground runs between subjects.
+   * Shape only: the quotas still fix the areas, so exactness is unaffected.
+   */
+  mold?: boolean | (Omit<MoldOptions, 'anchors'> & { generations?: number });
 }
 
 /**
@@ -258,3 +271,83 @@ export function mentions(body: string, name: string): boolean;
 export const byUrgency: (a: Notification, b: Notification) => number;
 
 export const RANK: Record<Level, number>;
+
+// --- knowledge hierarchy ---------------------------------------------------
+
+/** `child: parent`. Roots simply have no entry. */
+export type Hierarchy = Record<string, string>;
+
+/** A small default hierarchy, enough to anchor common subjects. */
+export const knowledge: Hierarchy;
+
+export interface Placed {
+  x: number;
+  y: number;
+  depth: number;
+  /** The top-level branch this sits under. */
+  branch: string;
+}
+
+/**
+ * Coordinates for every node of a hierarchy, laid out radially so that
+ * siblings are adjacent and unrelated branches are far apart. Deterministic,
+ * and tolerant of cycles — a hierarchy baked out of Wikipedia will have them.
+ */
+export function radialLayout(
+  parents: Hierarchy,
+  options?: { extent?: number; innerRadius?: number; outerReach?: number },
+): Map<string, Placed>;
+
+/** A subject's place, falling back to the longest known suffix of its name. */
+export function resolve(subject: string, positions: Map<string, Placed>): Placed | null;
+
+/**
+ * Where subjects should sit before membership has any say. Pass to
+ * `atlas({ anchors })`; subjects the hierarchy does not know are left out and
+ * placed by co-membership as before.
+ */
+export function anchorsFor(
+  subjects: Iterable<string>,
+  positions: Map<string, Placed>,
+): Map<string, { x: number; y: number }>;
+
+export function known(parents: Hierarchy): Set<string>;
+
+// --- mould -----------------------------------------------------------------
+
+export interface MoldOptions {
+  grid?: number;
+  extent?: number;
+  anchors: Map<string, { x: number; y: number }>;
+  /** How big each subject is, which decides how much food it puts out. */
+  weight?: Map<string, number>;
+  /** `[a, b, howManyPeopleHoldBoth]` — the traffic the network is grown from. */
+  affinity?: Array<[string, string, number]>;
+  agents?: number;
+  sensorAngle?: number;
+  turn?: number;
+  sensorDistance?: number;
+  deposit?: number;
+  decay?: number;
+  /** How firmly an agent steers toward its own pair rather than the crowd. */
+  homing?: number;
+  seed?: number;
+}
+
+/**
+ * A Physarum model. Subjects are food, co-membership is traffic, and the
+ * network that emerges is an adjacency that grew rather than one computed.
+ * Deterministic given a seed.
+ */
+export class Mold {
+  constructor(options: MoldOptions);
+  readonly agents: Array<{ x: number; y: number; heading: number }>;
+  readonly steps: number;
+  step(times?: number): this;
+  /** The trail, normalised to 0..1, for biasing growth or for drawing. */
+  field(): Float32Array;
+  /** Which subjects it joined up, by widest path — not along the chord. */
+  network(options?: { threshold?: number }): Array<{ subjects: string[]; strength: number }>;
+}
+
+export function weave(options: MoldOptions & { generations?: number }): Mold;
