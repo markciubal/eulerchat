@@ -98,6 +98,10 @@
     "./qr": {
       "types": "./lib/index.d.ts",
       "default": "./lib/qr.js"
+    },
+    "./ledger": {
+      "types": "./server/store.d.ts",
+      "default": "./server/ledger.js"
     }
   },
   "bin": {

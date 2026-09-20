@@ -135,6 +135,11 @@ function handleFrame(evt) {
     case 'history':
       state.history = msg.rooms;
       renderRoom();
+      offerWhatWeKept();
+      break;
+
+    case 'restored':
+      if (msg.restored) notify(`Put back ${msg.restored} message${msg.restored === 1 ? '' : 's'} you had kept.`);
       break;
 
     case 'message': {
@@ -1044,7 +1049,23 @@ const KEPT_MOST = 500;
  */
 function keep(message) {
   if (!state.recording) return;
-  state.kept.push({ room: message.room, author: message.author, body: message.body, at: message.at });
+  // Everything needed to put this back, not just enough to read it. The four
+  // fields this used to keep could not rebuild a room even in principle: the
+  // server checks a returned copy by hashing it, and a hash of half a message
+  // matches nothing.
+  state.kept.push({
+    id: message.id,
+    room: message.room,
+    author: message.author,
+    authorId: message.authorId,
+    body: message.body,
+    at: message.at,
+    sealed: Boolean(message.sealed),
+    // The ciphertext is what the server committed to for a sealed message, so
+    // it is what has to come back. The readable text above is for this browser.
+    envelope: message.envelope ?? undefined,
+    replyTo: message.replyTo ?? undefined,
+  });
   // Trimmed here and not only on the way out, or a long session grows a list
   // it never stops holding.
   if (state.kept.length > KEPT_MOST) state.kept = state.kept.slice(-KEPT_MOST);
@@ -1053,6 +1074,29 @@ function keep(message) {
   } catch {
     /* no room, or a private window: the copy is a convenience */
   }
+}
+
+/**
+ * Offer what this browser kept, in case the server lost it.
+ *
+ * Only worth doing when the server has come back with less than we have, so
+ * the ordinary case - a server that never went down - costs nothing. Nothing
+ * here is trusted at the other end: every message is checked against the
+ * server's own record of what it saw, and anything invented, altered or
+ * deliberately deleted is refused. See `World.restore`.
+ */
+let offered = false;
+function offerWhatWeKept() {
+  if (offered || !state.kept.length) return;
+
+  const held = new Set(
+    Object.values(state.history ?? {}).flatMap((log) => log.map((m) => m.id)),
+  );
+  const missing = state.kept.filter((m) => m.id && !held.has(m.id));
+  if (!missing.length) return;
+
+  offered = true;
+  send({ type: 'restore', messages: missing.slice(-500) });
 }
 
 /** Whatever was kept before this tab opened. */

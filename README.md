@@ -212,6 +212,7 @@ rooms over your own transport, and building an atlas.
 | `eulerchat/flag` | `scan`, `rank`, `REASONS` — which rooms need looking at |
 | `eulerchat/public-api` | `createPublicApi` — the open read side and the firehose |
 | `eulerchat/qr` | `qr`, `toText` — the invitation as a square |
+| `eulerchat/ledger` | `FileLedger`, `MemoryLedger` — the durable anchor |
 | `eulerchat/knowledge` | the bundled hierarchy, and `subfields()` |
 | `eulerchat/adapt` | `fromRows` — read the tables you already have |
 | `eulerchat/embed` | `mountMap`, `viewFor` — the map in an element you own |
@@ -312,6 +313,53 @@ because people choose what to say based on what they think is true.
 If a message cannot be locked — no reader list, keys not made yet, the server
 unreachable — it is **not sent**. It stays in the box and says why. A request to
 encrypt that cannot be honoured has to fail rather than quietly do the opposite.
+
+
+## Surviving a restart
+
+The server keeps one small durable thing, and it is not the conversations. It
+is a hash of each message as it was posted, plus the record of deletions:
+sixty-four characters however long the message was, append-only, a single file
+you can read in a text editor.
+
+```
+eulerchat --ledger ./data/ledger.jsonl   # on by default
+eulerchat --no-ledger                    # keep nothing
+```
+
+```js
+import { FileLedger } from 'eulerchat/ledger';
+world.useLedger(new FileLedger('./data/ledger.jsonl'));
+// -> { messages: 4210, deletions: 19 }
+```
+
+The conversations come back from the people who kept a copy. A browser with
+*keep my own copy* turned on offers what it has when it reconnects, and the
+server accepts a message only if its hash is one it committed to at the time.
+That is what makes restoring from clients safe rather than reckless: without
+the anchor, a server rebuilding from client data is rebuilding from
+unauthenticated input, and anybody could attribute words to somebody who never
+said them.
+
+Three things are refused however confidently they are offered:
+
+| | |
+|---|---|
+| **a hash it does not know** | invented, altered, re-attributed or moved between rooms |
+| **anything in the deletion chain** | somebody pressed delete; a restart is not a way to undo that |
+| **anything past twelve hours** | the promise was twelve hours, not twelve hours and a restart |
+
+`Ledger` is two methods, `append` and `load`, so putting this behind Postgres,
+Redis or a queue does not mean implementing a storage engine. `load` only runs
+at boot.
+
+**What this does not give you.** Completeness: clients hand back what they
+happened to keep, so a room nobody was recording comes back empty and a
+restored room may have holes. What comes back is genuine, which is a different
+claim from all of it coming back. Nor does it protect you from whoever runs the
+server — the ledger is a file on their disk, and an operator who edits it can
+authorise anything. The chaining makes that detectable to somebody who noted an
+earlier head, not impossible.
 
 
 ## What deletion can and cannot show

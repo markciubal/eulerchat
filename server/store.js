@@ -20,6 +20,7 @@ import { plain } from '../lib/plain.js';
 import { isCluster, split as splitCluster, within } from '../lib/cluster.js';
 import { commitmentInput, entryInput } from '../lib/receipt.js';
 import { createHash } from 'node:crypto';
+import { MemoryLedger, isLedger } from './ledger.js';
 
 // Synchronous here because deletion happens on a timer and the sweep should
 // not become asynchronous for the sake of a hash. The browser verifies the
@@ -115,6 +116,14 @@ export class World {
      * elsewhere; see `lib/receipt.js`, which says so at more length.
      */
     /** @type {Array<object>} */ this.deletions = [];
+    /**
+     * Every message the server has ever seen, by hash, so that a copy handed
+     * back later can be told from a forgery. Small: a commitment is the same
+     * size whatever the message was.
+     */
+    /** @type {Map<string, {room: string, at: number, seq: number}>} */ this.committed = new Map();
+    /** Where the two above are written down. Nothing durable unless set. */
+    this.ledger = null;
   }
 
   // --- catalogue & membership -------------------------------------------
@@ -705,6 +714,146 @@ export class World {
    * receipt can be handed to anybody without handing them the conversation:
    * only somebody who already kept the message can recognise it here.
    */
+  /**
+   * Write to whatever durable place has been given, if any.
+   *
+   * Silent when there is none: a world with no ledger is the ordinary
+   * in-memory case, and it works exactly as before.
+   */
+  #record(entry) {
+    try {
+      this.ledger?.append(entry);
+    } catch (err) {
+      // Losing the anchor for one message is bad; refusing to carry the
+      // conversation because the disk is full is worse.
+      console.error('eulerchat: could not write to the ledger -', err.message);
+    }
+    return entry;
+  }
+
+  /**
+   * Attach a durable ledger and read back what it already holds.
+   *
+   * Only commitments and deletions come back. The messages themselves are not
+   * here and are not meant to be; they come from the people who kept them,
+   * and `restore` is what checks them against this.
+   */
+  useLedger(ledger = new MemoryLedger()) {
+    if (!isLedger(ledger)) throw new Error('a ledger needs append() and load()');
+    this.ledger = ledger;
+
+    for (const entry of ledger.load()) {
+      if (entry.kind === 'post') {
+        this.committed.set(entry.commitment, {
+          room: entry.room,
+          at: entry.at,
+          seq: entry.seq ?? this.committed.size,
+        });
+      } else if (entry.kind === 'delete') {
+        this.deletions.push(entry.receipt);
+      }
+    }
+    return {
+      messages: this.committed.size,
+      deletions: this.deletions.length,
+    };
+  }
+
+  /**
+   * Take back copies people kept, and accept only what can be proved.
+   *
+   * Each candidate is hashed the same way it was hashed when it was posted. If
+   * that hash is not in the ledger the message is not one this server ever
+   * saw, whatever it claims about itself - so a forged message, or a genuine
+   * one with a word changed, or one attributed to somebody who did not write
+   * it, all fail here rather than being taken on trust.
+   *
+   * Two further refusals, which are the ones that make this safe to offer at
+   * all. A message named in the deletion chain does not come back: somebody
+   * pressed delete, or it aged out, and a restart must not be a way of undoing
+   * that. And a message older than the retention window does not come back
+   * either, even if it was never explicitly deleted, because the promise was
+   * twelve hours rather than twelve hours and a restart.
+   *
+   * @returns {{restored: number, refused: {unknown: number, deleted: number, expired: number, duplicate: number}}}
+   */
+  restore(messages, { now: at = now() } = {}) {
+    const refused = { unknown: 0, deleted: 0, expired: 0, duplicate: 0 };
+    const buried = new Set(this.deletions.flatMap((entry) => entry.commitments ?? []));
+    let restored = 0;
+
+    for (const candidate of messages ?? []) {
+      const message = this.#asMessage(candidate);
+      if (!message) {
+        refused.unknown += 1;
+        continue;
+      }
+
+      const mark = sha(commitmentInput(message));
+      const anchor = this.committed.get(mark);
+      if (!anchor) {
+        refused.unknown += 1;
+        continue;
+      }
+      // Where it sat when it was said, which the client does not get a vote on.
+      message.seq = anchor.seq;
+      if (buried.has(mark)) {
+        refused.deleted += 1;
+        continue;
+      }
+      if (at - message.at > KEEP_FOR) {
+        refused.expired += 1;
+        continue;
+      }
+
+      const log = this.messages.get(message.room) ?? [];
+      if (log.some((held) => held.id === message.id)) {
+        refused.duplicate += 1;
+        continue;
+      }
+
+      log.push(message);
+      log.sort((a, b) => a.at - b.at || (a.seq ?? 0) - (b.seq ?? 0));
+      this.messages.set(message.room, log);
+      restored += 1;
+    }
+
+    return { restored, refused };
+  }
+
+  /**
+   * A candidate from a browser, reduced to the fields a message actually has.
+   *
+   * Anything else it carries is dropped rather than trusted. Only the fields
+   * below go into the hash, so a client that adds its own are not smuggling
+   * them in - they would simply fail to match.
+   */
+  #asMessage(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const room = String(raw.room ?? '');
+    const subjects = parse(room);
+    if (!subjects.length || !raw.id || !Number.isFinite(raw.at)) return null;
+
+    for (const subject of subjects) this.subjects.add(subject);
+
+    const message = {
+      id: String(raw.id),
+      room,
+      subjects,
+      author: String(raw.author ?? 'anon'),
+      authorId: String(raw.authorId ?? ''),
+      body: raw.sealed ? '' : String(raw.body ?? ''),
+      at: Number(raw.at),
+      restored: true,
+    };
+    if (raw.sealed) {
+      message.sealed = true;
+      message.envelope = raw.envelope ?? null;
+    }
+    if (raw.replyTo) message.replyTo = raw.replyTo;
+    return message;
+  }
+
   #receipt(messages, reason) {
     const previous = this.deletions.at(-1)?.hash ?? '';
     const entry = {
@@ -717,6 +866,7 @@ export class World {
     };
     entry.hash = sha(entryInput(entry));
     this.deletions.push(entry);
+    this.#record({ kind: 'delete', receipt: entry });
     return entry;
   }
 
@@ -1038,6 +1188,21 @@ export class World {
     if (this._words && !message.sealed && !scan(message.body, { words: this._words }).clean) {
       this.flagged.set(roomKey, (this.flagged.get(roomKey) ?? 0) + 1);
     }
+
+    // The anchor: a hash of this message, so a copy handed back after a
+    // restart can be told from something invented. Written before anybody is
+    // told the message exists.
+    //
+    // The sequence number is part of the anchor rather than an afterthought.
+    // Several messages can share a millisecond - in a busy room they often do
+    // - so `at` alone cannot put a restored room back in the order it was
+    // actually said. The ledger already knows that order, because it was
+    // written in it.
+    const mark = sha(commitmentInput(message));
+    const seq = this.committed.size;
+    message.seq = seq;
+    this.committed.set(mark, { room: roomKey, at: message.at, seq });
+    this.#record({ kind: 'post', commitment: mark, room: roomKey, at: message.at, seq });
 
     // How many this reaches is what decides whether it is worth interrupting
     // anyone for, and it is already known here.

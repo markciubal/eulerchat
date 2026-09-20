@@ -360,7 +360,7 @@ export function createEulerChat(options = {}) {
       bucket.tokens -= cost;
       return true;
     };
-    const PRICE = { createSubject: 10, atlas: 8, overview: 6, post: 2, search: 1, join: 1, leave: 1, funnel: 2, keys: 3, readers: 2, record: 1, report: 4, concerns: 3, concern: 2, clear: 2, vote: 1, forget: 2 };
+    const PRICE = { createSubject: 10, atlas: 8, overview: 6, post: 2, search: 1, join: 1, leave: 1, funnel: 2, keys: 3, readers: 2, record: 1, report: 4, concerns: 3, concern: 2, clear: 2, vote: 1, forget: 2, restore: 6 };
 
     socket.on('message', (raw) => {
       let msg;
@@ -430,6 +430,26 @@ export function createEulerChat(options = {}) {
               send(other.socket, { type: 'key', keyId: session.keyId, publicKey: session.publicKey });
               send(session.socket, { type: 'key', keyId: other.keyId, publicKey: other.publicKey });
             }
+            break;
+          }
+
+          case 'restore': {
+            // Copies somebody kept, offered back after a restart. Every one is
+            // checked against the ledger; nothing is taken on trust. See
+            // `World.restore`, which is where the checking lives.
+            const offered = Array.isArray(msg.messages) ? msg.messages.slice(0, 500) : [];
+            const result = world.restore(offered);
+            if (result.restored) {
+              // Everyone gets the rooms back, not just whoever happened to
+              // still have them.
+              for (const listener of sessions) {
+                send(listener.socket, { type: 'history', rooms: world.historyFor(listener.userId) });
+              }
+              console.log(
+                `eulerchat: ${result.restored} message${result.restored === 1 ? '' : 's'} restored from a client`,
+              );
+            }
+            send(socket, { type: 'restored', ...result });
             break;
           }
 

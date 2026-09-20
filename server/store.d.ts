@@ -202,12 +202,80 @@ export class World {
 
   /** Every deletion so far, in order. */
   deletions: Receipt[];
+
+  // --- durability --------------------------------------------------------
+
+  /**
+   * Attach somewhere durable and read back what it holds.
+   *
+   * Only hashes and deletions come back: the conversations are not in the
+   * ledger and are not meant to be. They come from whoever kept a copy, and
+   * `restore` checks each one against this.
+   */
+  useLedger(ledger?: Ledger): { messages: number; deletions: number };
+
+  /**
+   * Take back copies people kept, accepting only what can be proved.
+   *
+   * Each candidate is hashed the way it was hashed when posted; anything that
+   * does not match is not a message this server saw, whatever it claims. A
+   * message named in the deletion chain, or older than the retention window,
+   * is refused however genuine it is - a restart must not be a way of undoing
+   * a deletion.
+   *
+   * Restored rooms are genuine but may be incomplete: clients hand back what
+   * they happened to keep.
+   */
+  restore(
+    messages: unknown[],
+    options?: { now?: number },
+  ): {
+    restored: number;
+    refused: { unknown: number; deleted: number; expired: number; duplicate: number };
+  };
+
+  /** Every message ever seen, by hash. Small: a commitment is a fixed size. */
+  committed: Map<string, { room: RegionKey; at: number; seq: number }>;
+
+  ledger: Ledger | null;
   /** Who a message reaches: user ids, never connections. */
   audienceFor(tags: Iterable<string>, among?: Iterable<string>): string[];
   historyFor(userId: string): Record<RegionKey, Message[]>;
 
   searchSubjects(query: string, limit?: number): Array<{ id: string; population: number }>;
 }
+
+/**
+ * Somewhere append-only to write the anchor.
+ *
+ * Two methods on purpose: anybody putting this behind Postgres, Redis or a
+ * queue should not have to implement a storage engine, and `load` only runs at
+ * boot.
+ */
+export interface Ledger {
+  append(record: object): unknown;
+  load(): object[];
+  close?(): void;
+}
+
+/** One JSON object per line, never rewritten. The default. */
+export declare class FileLedger implements Ledger {
+  constructor(file?: string);
+  append(record: object): object;
+  load(): object[];
+  close(): void;
+}
+
+/** The same thing in memory, for tests and for anybody who wants no file. */
+export declare class MemoryLedger implements Ledger {
+  constructor(records?: object[]);
+  records: object[];
+  append(record: object): object;
+  load(): object[];
+  close(): void;
+}
+
+export declare function isLedger(thing: unknown): boolean;
 
 /** How long the server keeps a message before forgetting it. */
 export declare const KEEP_FOR: number;

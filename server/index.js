@@ -5,6 +5,7 @@
  */
 
 import { createEulerChat, World, seed, populate } from './app.js';
+import { FileLedger } from './ledger.js';
 
 const flag = (name, fallback) => {
   const at = process.argv.indexOf(`--${name}`);
@@ -21,6 +22,36 @@ const PORT = flag('port', Number(process.env.PORT ?? 8787));
 // the small hand-written one, which is the better thing to read the code by.
 const interests = flag('interests', 0);
 const world = new World();
+
+/**
+ * Where the anchor is written, so a restart is survivable.
+ *
+ * On by default, because a chat server that forgets everything it ever saw the
+ * moment it is restarted is not one anybody should have to discover the
+ * properties of in production. It is a single append-only file and it holds no
+ * conversations - only a hash of each message and the record of deletions -
+ * so it stays small and can be read with any text editor.
+ *
+ * `--ledger <path>` moves it. `--no-ledger` turns it off and goes back to
+ * keeping nothing, which is the right thing for a throwaway demo and the wrong
+ * thing for anything else.
+ */
+const wantsLedger = !process.argv.includes('--no-ledger');
+let ledger = null;
+if (wantsLedger) {
+  const at = process.argv.indexOf('--ledger');
+  const file = at > -1 ? process.argv[at + 1] : process.env.EULERCHAT_LEDGER ?? 'eulerchat-ledger.jsonl';
+  ledger = new FileLedger(file);
+  const held = world.useLedger(ledger);
+  if (held.messages) {
+    console.log(
+      `eulerchat: ${held.messages} messages and ${held.deletions} deletions remembered from ${file}.
+` +
+        '  The conversations themselves come back from whoever kept a copy.',
+    );
+  }
+}
+
 if (interests > 0) populate(world, { subjects: interests, users: flag('people', 4000) });
 else seed(world);
 
