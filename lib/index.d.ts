@@ -199,3 +199,62 @@ export function hue(subject: string): number;
 export function blend(subjects: Iterable<string>): number;
 export function stroke(subject: string): string;
 export function regionFill(subjects: string[]): string;
+
+// --- notifications ---------------------------------------------------------
+
+export const QUIET: 'quiet';
+export const NOTIFY: 'notify';
+export const ALERT: 'alert';
+export type Level = 'quiet' | 'notify' | 'alert';
+
+export interface NotifyPrefs {
+  /** At or below this many people, a room is small enough to be conspicuous in. */
+  intimate?: number;
+  mentions?: boolean;
+  /** Rooms opening and closing around you. */
+  lifecycle?: boolean;
+  muted?: Iterable<RegionKey>;
+}
+
+export interface Watcher extends NotifyPrefs {
+  userId: string;
+  name?: string;
+  subscription: Iterable<string>;
+  /** The room they are looking at, which therefore stops interrupting them. */
+  viewing?: RegionKey | null;
+}
+
+export type WorldEvent =
+  | { type: 'message'; room: RegionKey; message: { [k: string]: any }; at?: number }
+  | { type: 'room-opened'; room: RegionKey; subjects: string[]; population: number; at?: number }
+  | { type: 'room-closed'; room: RegionKey; subjects: string[]; population: 0; at?: number };
+
+export interface Notification {
+  kind: 'message' | 'mention' | 'room-opened' | 'room-closed';
+  level: Level;
+  room: RegionKey;
+  subjects: string[];
+  at: number;
+  title: string;
+  body: string;
+  from?: string;
+  messageId?: string;
+}
+
+/**
+ * What is worth interrupting one person for, or null.
+ *
+ * Narrow rooms are loud and broad rooms are quiet: the fewer people a message
+ * reaches, the more it is addressed to you. Returns null for anything in a
+ * room the watcher could not already read, which is the rule that keeps
+ * notifications from leaking conversations.
+ */
+export function classify(event: WorldEvent, watcher: Watcher): Notification | null;
+
+/** Does `body` name this person? Wants the `@`; bare names match too much. */
+export function mentions(body: string, name: string): boolean;
+
+/** Most urgent first, then newest. */
+export const byUrgency: (a: Notification, b: Notification) => number;
+
+export const RANK: Record<Level, number>;

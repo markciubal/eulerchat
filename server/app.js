@@ -23,13 +23,14 @@ import { WebSocketServer } from 'ws';
 import { World, seed } from './store.js';
 import { populate } from './populate.js';
 import { Sessions } from './sessions.js';
+import { Notifications } from './notifications.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(here, '..', 'public');
 const libDir = path.join(here, '..', 'lib');
 const projectRoot = path.join(here, '..');
 
-export { World, seed, populate, Sessions };
+export { World, seed, populate, Sessions, Notifications };
 
 /**
  * @param {object} [options]
@@ -43,6 +44,15 @@ export function createEulerChat(options = {}) {
   const server = options.server ?? http.createServer();
   // Connections live here rather than on the world; see server/sessions.js.
   const sessions = options.sessions ?? new Sessions();
+  const notifications = options.notifications ?? new Notifications(world);
+
+  // A notification only counts as delivered if it reached a live connection;
+  // otherwise it is kept for whenever they come back.
+  notifications.onNotify((userId, note) => {
+    const open = sessions.forUser(userId);
+    for (const s of open) send(s.socket, { type: 'notification', notification: note });
+    return open.length > 0;
+  });
 
   // --- static ---------------------------------------------------------------
 
@@ -157,6 +167,13 @@ export function createEulerChat(options = {}) {
   const GRACE_MS = 60_000;
   const orphans = new Map();
 
+  /** Whatever happened while they were away, on the way in. */
+  const sendBacklog = (socket, userId) => {
+    const held = notifications.drain(userId);
+    if (held.length) send(socket, { type: 'missed', notifications: held });
+    send(socket, { type: 'unread', counts: notifications.counts(userId) });
+  };
+
   wss.on('connection', (socket) => {
     const sessionId = crypto.randomUUID().slice(0, 8);
     let userId = world.addUser(`guest-${sessionId.slice(0, 4)}`);
@@ -233,6 +250,7 @@ export function createEulerChat(options = {}) {
 
             send(socket, { type: 'welcome', you: { ...world.profiles.get(userId) }, maxArity: 3 });
             send(socket, { type: 'history', rooms: world.historyFor(userId) });
+            sendBacklog(socket, userId);
             pushDiagrams();
             break;
           }
@@ -260,6 +278,22 @@ export function createEulerChat(options = {}) {
           case 'atlas': {
             const want = Math.min(14, Math.max(2, Number(msg.subjects) || 5));
             send(socket, { type: 'atlas', ...world.atlasFor(userId, want) });
+            break;
+          }
+
+          case 'notifications': {
+            const settings = msg.settings
+              ? notifications.configure(userId, msg.settings)
+              : notifications.settings(userId);
+            send(socket, { type: 'notifications', settings, counts: notifications.counts(userId) });
+            break;
+          }
+
+          case 'seen': {
+            // Reading a room is better than being told about it.
+            notifications.looking(userId, msg.room ?? null);
+            if (msg.clear) notifications.clear(userId, msg.room ?? undefined);
+            send(socket, { type: 'unread', counts: notifications.counts(userId) });
             break;
           }
 
@@ -317,9 +351,11 @@ export function createEulerChat(options = {}) {
   return {
     world,
     sessions,
+    notifications,
     server,
     wss,
     close() {
+      notifications.close();
       clearInterval(heartbeat);
       for (const pending of orphans.values()) clearTimeout(pending);
       orphans.clear();

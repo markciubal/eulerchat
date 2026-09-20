@@ -38,7 +38,11 @@
       "types": "./server/store.d.ts",
       "default": "./server/store.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./notify": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/notify.js"
+    }
   },
   "bin": {
     "eulerchat": "bin/eulerchat.js"

@@ -38,6 +38,7 @@ export class World {
     /** @type {Map<string, Array>} */ this.messages = new Map();
     this._census = null;
     this._layouts = new Map();
+    /** @type {Set<(event: object) => void>} */ this._watchers = new Set();
   }
 
   // --- catalogue & membership -------------------------------------------
@@ -80,8 +81,14 @@ export class World {
       throw new Error(`you can hold at most ${MAX_SUBSCRIPTIONS} subjects — leave one first`);
     }
 
-    this.#touch(held, subject, +1);
+    // Announce only once the membership is actually true. Emitting from inside
+    // `#touch` meant a room was declared open while the person who opened it
+    // was still, as far as the subscription was concerned, not in it — so the
+    // containment check quite correctly refused to tell them about it, and the
+    // one event this design has that no flat chat model does never fired.
+    const opened = this.#touch(held, subject, +1);
     held.add(subject);
+    this.#flush(opened);
   }
 
   leave(userId, subject) {
@@ -89,7 +96,7 @@ export class World {
     if (!held || !held.has(subject)) return;
 
     held.delete(subject);
-    this.#touch(held, subject, -1);
+    this.#flush(this.#touch(held, subject, -1));
   }
 
   /** Drop someone from the world entirely, region counts included. */
@@ -113,7 +120,8 @@ export class World {
    * `held` must exclude `subject` — the caller adds or removes it around this.
    */
   #touch(held, subject, delta) {
-    if (!this._census) return; // nothing built yet; the cold path will be right
+    if (!this._census) return []; // nothing built yet; the cold path will be right
+    const events = [];
 
     const regions = [[subject]];
     for (const rest of subsets([...held], MAX_ARITY - 1)) {
@@ -127,10 +135,55 @@ export class World {
       // A region that empties loses its key rather than keeping a zero. That
       // is the Euler property, and it has to survive incremental updates or
       // rooms would linger after the last person left them.
+      //
+      // Crossing that boundary in either direction is a room coming into or
+      // going out of existence — something a flat chat model has no equivalent
+      // of, and worth telling people about. It is known exactly here and
+      // nowhere else, so it is announced from here.
+      const existed = this._census.has(k);
       if (next > 0) this._census.set(k, next);
       else this._census.delete(k);
 
+      if (!existed && next > 0) {
+        events.push({ type: 'room-opened', room: k, subjects: region, population: next });
+      } else if (existed && next <= 0) {
+        events.push({ type: 'room-closed', room: k, subjects: region, population: 0 });
+      }
+
       if (this._index) this.#reindex(region, k, next);
+    }
+    return events;
+  }
+
+  /** Announce a batch of events, once the change they describe has landed. */
+  #flush(events) {
+    for (const event of events) this.#announce(event);
+  }
+
+  /**
+   * Listen to what happens in the world: rooms opening and closing, and
+   * messages posted. Domain events, not transport — they carry no connection
+   * and no socket, so a caller can turn them into frames, push notifications,
+   * a webhook or a log.
+   *
+   * @param {(event: object) => void} listener
+   * @returns {() => void} stop listening
+   */
+  watch(listener) {
+    this._watchers.add(listener);
+    return () => this._watchers.delete(listener);
+  }
+
+  #announce(event) {
+    if (!this._watchers.size) return;
+    const stamped = { at: now(), ...event };
+    for (const listener of this._watchers) {
+      // One bad listener must not break a join for everybody else.
+      try {
+        listener(stamped);
+      } catch {
+        /* a listener's problem is its own */
+      }
     }
   }
 
@@ -375,6 +428,10 @@ export class World {
     if (log.length > 500) log.shift();
     this.messages.set(roomKey, log);
 
+    // How many this reaches is what decides whether it is worth interrupting
+    // anyone for, and it is already known here.
+    message.reach = this.census().get(roomKey) ?? 1;
+    this.#announce({ type: 'message', room: roomKey, message });
     return message;
   }
 

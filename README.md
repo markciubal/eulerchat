@@ -75,6 +75,68 @@ receives(['art'], ['art', 'philosophy']);              // false
 neighbourhood(census(people), ['art'], 3);             // what to show someone
 ```
 
+### Notifications
+
+Delivery and notification are different questions. `T ⊆ S` settles which
+messages *reach* you, and in a busy subject that is a great many. Which of
+them deserve your attention is answered by the shape of the room:
+
+| Room | Reaches | |
+|---|---|---|
+| `art` | everyone holding art | you are one of a crowd — counted, not shown |
+| `art+philosophy` | only people holding both | narrower, more specific — badged |
+| a room of two | almost only you | nearly a direct message — interrupts |
+
+Narrow rooms are loud and broad rooms are quiet, which is the opposite of
+what message volume alone would give you. Being named always interrupts;
+the room you are currently reading never does.
+
+```js
+import { classify } from 'eulerchat';
+
+classify(event, {
+  userId, name, subscription,
+  intimate: 8,        // at or below this many people, a room is conspicuous
+  muted: ['art'],
+  viewing: 'art+philosophy',   // what they are reading does not interrupt them
+});
+// -> { kind, level: 'quiet' | 'notify' | 'alert', room, title, body } | null
+```
+
+It returns `null` for anything in a room the watcher could not already read.
+That rule is the one worth keeping whatever else is tuned: a notification must
+never reveal a conversation somebody is not part of.
+
+**Two events no flat chat model has.** Rooms here are derived from membership,
+so they genuinely come into and go out of existence — and the incremental
+census knows the exact moment a region key is created or destroyed:
+
+```
+"art ∩ music ∩ philosophy now exists"
+ Nobody held all of these before. You are the only one here so far.
+```
+
+Subscribe to them, on the world itself, with no transport attached:
+
+```js
+const stop = world.watch((event) => {
+  // { type: 'message' | 'room-opened' | 'room-closed', room, ... }
+});
+```
+
+`Notifications` in `eulerchat/app` wires those to per-person preferences,
+unread counts and a backlog for people who are away. A listener returning
+false means undelivered, and it is held until they reconnect:
+
+```js
+import { Notifications } from 'eulerchat/app';
+
+const notes = new Notifications(world);
+notes.onNotify((userId, note) => myPushService.send(userId, note));
+notes.drain(userId);   // what they missed, most urgent first
+```
+
+
 ### Mount the chat server in an app you already have
 
 ```js
@@ -127,6 +189,7 @@ Importing this does not bind a port or read `process.argv`. The CLI
 | `eulerchat/euler` | circle layout: `layout`, `lensArea`, `separation` |
 | `eulerchat/atlas` | routed layout: `atlas` |
 | `eulerchat/svg` | `toSVG` |
+| `eulerchat/notify` | `classify`, `mentions` — what is worth interrupting for |
 | `eulerchat/app` | `createEulerChat` |
 | `eulerchat/store` | `World`, `seed` |
 

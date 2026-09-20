@@ -12,6 +12,8 @@ const state = {
   hovered: null,
   fills: new Map(),
   results: null,
+  unread: {},
+  missed: [],
   view: 'map', // 'map' is the live circle surface; 'atlas' is a routed snapshot
   atlas: null,
   territories: new Map(),
@@ -112,6 +114,25 @@ function handleFrame(evt) {
       if (state.view === 'atlas') drawAtlas();
       break;
 
+    case 'unread':
+      state.unread = msg.counts ?? {};
+      renderRooms();
+      break;
+
+    case 'missed':
+      // Everything that happened while they were away, newest urgency first.
+      state.missed = msg.notifications ?? [];
+      if (state.missed.length) {
+        notify(`${state.missed.length} missed while you were away`);
+      }
+      break;
+
+    case 'notification':
+      state.unread[msg.notification.room] = (state.unread[msg.notification.room] ?? 0) + 1;
+      renderRooms();
+      announce(msg.notification);
+      break;
+
     case 'results':
       // Ignore a result that has been overtaken by newer typing.
       if (msg.query === $('subject-name').value.trim()) {
@@ -169,17 +190,49 @@ function draw() {
 }
 
 /**
- * Every room in view, listed.
+ * Open a room, and stop it nagging.
+ *
+ * Reading a room is better than being told about it, so the server is told
+ * where they are looking — that room stops interrupting and its badge clears.
+ */
+function select(room) {
+  state.selected = room;
+  delete state.unread[room];
+  send({ type: 'seen', room, clear: true });
+  repaint();
+  renderRooms();
+  renderRoom();
+}
+
+/**
+ * Hand an alert to the desktop, if they have allowed it.
+ *
+ * Only ever for `alert` — someone said their name, or a room small enough that
+ * their presence is conspicuous. Anything else is a badge, which is what a
+ * badge is for.
+ */
+function announce(note) {
+  if (note.level !== 'alert') return;
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  try {
+    new Notification(note.title, { body: note.body, tag: note.room });
+  } catch {
+    /* the browser may refuse; the badge already carries it */
+  }
+}
+
+/** Whichever view is showing decides which rooms are on offer. */
+const currentRooms = () =>
+  (state.view === 'atlas' ? state.atlas?.rooms : state.diagram?.rooms) ?? [];
+
+/**
+ * Every room in view, listed, with anything waiting in it.
  *
  * The map is the good way in, but it cannot be the only way. A room whose
  * exclusive area is covered over by its neighbours has no ground to click —
  * which happens most often to single-subject rooms, since those are the ones
  * their overlaps eat into. The list reaches them regardless of geometry.
  */
-/** Whichever view is showing decides which rooms are on offer. */
-const currentRooms = () =>
-  (state.view === 'atlas' ? state.atlas?.rooms : state.diagram?.rooms) ?? [];
-
 function renderRooms() {
   const list = $('rooms');
   list.textContent = '';
@@ -202,11 +255,17 @@ function renderRooms() {
     count.textContent = String(room.population);
 
     button.append(dot, name, count);
+
+    const waiting = state.unread[room.key] ?? 0;
+    if (waiting) {
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = waiting > 99 ? '99+' : String(waiting);
+      button.append(badge);
+      button.classList.add('unread');
+    }
     button.addEventListener('click', () => {
-      state.selected = room.key;
-      repaint();
-      renderRooms();
-      renderRoom();
+      select(room.key);
     });
 
     li.append(button);
@@ -326,10 +385,7 @@ svg.addEventListener('click', (evt) => {
     notify('that is a seam between rooms, not a room.');
     return;
   }
-  state.selected = at;
-  repaint();
-  renderRooms();
-  renderRoom();
+  select(at);
 });
 
 // --- room -----------------------------------------------------------------
@@ -519,3 +575,30 @@ $('find').addEventListener('submit', (evt) => {
 $('name').addEventListener('change', (evt) => {
   send({ type: 'identify', name: evt.target.value });
 });
+
+// --- desktop alerts --------------------------------------------------------
+
+/**
+ * Asking for notification permission unprompted is the thing everyone hates,
+ * so it is behind a button and only ever asked for on a click.
+ */
+function paintBell() {
+  const bell = $('bell');
+  if (typeof Notification === 'undefined') {
+    bell.hidden = true;
+    return;
+  }
+  const on = Notification.permission === 'granted';
+  bell.classList.toggle('on', on);
+  bell.textContent = on ? 'alerts on' : 'alerts off';
+  bell.disabled = Notification.permission === 'denied';
+  if (bell.disabled) bell.textContent = 'alerts blocked';
+}
+
+$('bell').addEventListener('click', async () => {
+  if (typeof Notification === 'undefined') return;
+  if (Notification.permission === 'default') await Notification.requestPermission();
+  paintBell();
+});
+
+paintBell();

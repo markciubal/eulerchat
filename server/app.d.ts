@@ -1,5 +1,6 @@
 import type { Server } from 'node:http';
 import type { WebSocketServer } from 'ws';
+import type { Notification, NotifyPrefs, RegionKey } from '../lib/index.js';
 
 export { World, seed, type Message, type Room, type DiagramView, type AtlasView } from './store.js';
 
@@ -31,6 +32,41 @@ export class Sessions<Socket = unknown> {
   reaching(userIds: Iterable<string>): Array<Session<Socket>>;
 }
 
+/**
+ * Preferences, unread counts and a small backlog, per person.
+ *
+ * `classify` in the library decides what is worth someone's attention and
+ * knows nothing about connections; this keeps the state and hands finished
+ * notifications to whatever is listening, so the same rules can drive a
+ * WebSocket frame, a push notification, a webhook or an email digest.
+ */
+export class Notifications {
+  constructor(world: World, options?: { hold?: number });
+
+  /**
+   * Called with every notification worth showing. Return true if it actually
+   * reached the person; anything unclaimed is kept until they are back.
+   */
+  onNotify(listener: (userId: string, notification: Notification) => boolean | void): () => void;
+
+  settings(userId: string): Required<NotifyPrefs>;
+  configure(userId: string, changes?: NotifyPrefs): Required<NotifyPrefs>;
+  mute(userId: string, room: RegionKey): Required<NotifyPrefs>;
+  unmute(userId: string, room: RegionKey): Required<NotifyPrefs>;
+
+  /** Which room someone is looking at; that room stops interrupting them. */
+  looking(userId: string, room: RegionKey | null): void;
+
+  counts(userId: string): Record<RegionKey, number>;
+  total(userId: string): number;
+  /** Mark a room read, or everything if no room is given. */
+  clear(userId: string, room?: RegionKey): void;
+  /** What happened while they were away, most urgent first, emptied by reading. */
+  drain(userId: string): Notification[];
+
+  close(): void;
+}
+
 export function populate(
   world: World,
   options?: {
@@ -48,6 +84,7 @@ export function populate(
 export interface EulerChat {
   world: World;
   sessions: Sessions;
+  notifications: Notifications;
   server: Server;
   wss: WebSocketServer;
   close(): void;
@@ -62,6 +99,7 @@ export function createEulerChat(options?: {
   world?: World;
   server?: Server;
   sessions?: Sessions;
+  notifications?: Notifications;
   /** Also serve the bundled browser client. */
   serveClient?: boolean;
 }): EulerChat;
