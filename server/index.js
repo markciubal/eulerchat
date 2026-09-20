@@ -6,12 +6,16 @@
 
 import { createEulerChat, World, seed, populate } from './app.js';
 
-const PORT = Number(process.env.PORT ?? 8787);
-
 const flag = (name, fallback) => {
   const at = process.argv.indexOf(`--${name}`);
   return at > -1 ? Number(process.argv[at + 1]) : fallback;
 };
+
+// `--port` first, then the environment, then the default. The flag is
+// documented on the command line and was being ignored, which is worse than
+// not offering it: somebody who passes it watches the server start, reports
+// the wrong address, and has no reason to suspect the flag.
+const PORT = flag('port', Number(process.env.PORT ?? 8787));
 
 // `--interests 1000` builds a synthetic world at scale; with no flag you get
 // the small hand-written one, which is the better thing to read the code by.
