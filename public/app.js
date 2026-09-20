@@ -5,6 +5,7 @@ import { attachHelp, busyness, createCard, when } from './hints.js';
 import { available, identity, seal, unseal } from '../lib/seal.js';
 import { REASONS } from '../lib/flag.js';
 import { plain, saidAbout } from '../lib/plain.js';
+import { clusterFromLink, clusterOf, inviteLink, isCluster, label as subjectLabel, newCluster } from '../lib/cluster.js';
 
 const $ = (id) => document.getElementById(id);
 const svg = $('diagram');
@@ -27,6 +28,9 @@ const state = {
   kept: [],
   /** Messages this person has already reported, so the button can say so. */
   reported: new Set(),
+  /** messageId -> {up, down, score} as everyone else sees it. */
+  votes: new Map(),
+  cluster: null,
   written: [],
   viewBox: null,
   overview: null,
@@ -208,6 +212,23 @@ function handleFrame(evt) {
       // from where the person is standing, and saying otherwise invites them
       // to try again.
       notify(msg.already ? 'You have already reported that one.' : 'Reported. Thank you.');
+      break;
+
+    case 'votes':
+      state.votes.set(msg.messageId, { up: msg.up, down: msg.down, score: msg.score });
+      renderRoom();
+      break;
+
+    case 'forgotten':
+      for (const log of Object.values(state.history)) {
+        const at = log.findIndex((m) => m.id === msg.messageId);
+        if (at >= 0) log.splice(at, 1);
+      }
+      renderRoom();
+      break;
+
+    case 'receipt':
+      notify('Deleted, and written into the record of deletions.');
       break;
 
     case 'recording':
@@ -583,7 +604,7 @@ function renderRoom() {
       join.type = 'button';
       join.className = 'join-here';
       join.textContent = `join ${subject}`;
-      join.addEventListener('click', () => send({ type: 'join', subject }));
+      join.addEventListener('click', () => joinSubject(subject));
       help.append(join);
       if (i < missing.length - 1) help.append(document.createTextNode(' and '));
     });
@@ -631,10 +652,42 @@ function renderRoom() {
     // cannot read one, so nothing automatic will ever notice it. It belongs on
     // every message that is not your own, quietly, where somebody who needs it
     // will find it without it being the loudest thing in the room.
+    // Agreeing and disagreeing. Not a report, and deliberately not connected
+    // to one: see the help text, and `World.vote`.
+    const tally = state.votes.get(m.id) ?? { up: 0, down: 0, score: 0 };
+    const voting = document.createElement('span');
+    voting.className = 'votes';
+    for (const [which, value, mark] of [['up', 1, 'agree'], ['down', -1, 'disagree']]) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `vote vote-${which}`;
+      const count = which === 'up' ? tally.up : tally.down;
+      button.textContent = count ? `${mark} ${count}` : mark;
+      button.setAttribute('aria-label', `${mark} with the message from ${m.author}`);
+      button.addEventListener('click', () => send({ type: 'vote', messageId: m.id, value }));
+      voting.append(button);
+    }
+    head.append(voting);
+
+    // Your own words are yours to take back, and doing so is recorded like
+    // any other deletion rather than quietly.
+    if (m.authorId === state.me?.id) {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      // Its own class, not the report one. They sit in the same place and look
+      // alike, but "take back what I said" and "tell a moderator about what
+      // somebody else said" are different acts and should not be one selector.
+      remove.className = 'msg-action forget';
+      remove.textContent = 'delete';
+      remove.title = 'Delete this, and record that it was deleted';
+      remove.addEventListener('click', () => send({ type: 'forget', messageId: m.id }));
+      head.append(remove);
+    }
+
     if (m.authorId !== state.me?.id) {
       const flag = document.createElement('button');
       flag.type = 'button';
-      flag.className = 'report';
+      flag.className = 'msg-action report';
       flag.textContent = state.reported.has(m.id) ? 'reported' : 'report';
       flag.disabled = state.reported.has(m.id);
       flag.title = flag.disabled
@@ -741,6 +794,97 @@ $('composer').addEventListener('submit', (evt) => {
     if (body.value === text) body.value = '';
   })();
 });
+
+/**
+ * Small groups, and the link that gets somebody into one.
+ *
+ * Joining a cluster does not move anybody: it changes what a new join means.
+ * `art` becomes `kite-fox-9/art`, which is a different subject, so the people
+ * in it are exactly the people who used the same name.
+ */
+function renderCluster() {
+  const now = $('cluster-now');
+  const share = $('cluster-share');
+
+  if (!state.cluster) {
+    now.textContent = 'You are in the open part of this place.';
+    $('cluster-leave').hidden = true;
+    share.hidden = true;
+    return;
+  }
+
+  now.textContent = `You are in ${state.cluster}. Interests you join go in here.`;
+  $('cluster-leave').hidden = false;
+
+  const link = inviteLink(location.origin + location.pathname, state.cluster);
+  const anchor = $('cluster-url');
+  anchor.href = link;
+  anchor.textContent = link;
+  share.hidden = false;
+  drawInvite(link);
+}
+
+/**
+ * The invitation as a square somebody can point a camera at.
+ *
+ * Drawn as elements rather than as a picture, because this place does not do
+ * pictures - and because a grid of squares is exactly what the thing is.
+ */
+function drawInvite(link) {
+  const holder = $('cluster-qr');
+  holder.textContent = '';
+  if (!state.qr) return; // the encoder has not loaded; the link above still works
+
+  const { size, modules } = state.qr(link);
+  holder.style.setProperty('--qr-size', String(size));
+  for (const row of modules) {
+    for (const dark of row) {
+      const cell = document.createElement('i');
+      cell.className = dark ? 'qr-on' : 'qr-off';
+      holder.append(cell);
+    }
+  }
+}
+
+/**
+ * Join a subject, inside whatever group you are in.
+ *
+ * Every join goes through here so the group cannot be half-applied: a person
+ * in `kite-fox-9` who joined one interest inside it and one outside would be
+ * in two places at once and understand neither.
+ *
+ * A clustered subject is created on the way in, because it will not exist
+ * yet - the whole point is that it is a room only this group is in, and
+ * nobody has been there before the first person arrives.
+ */
+function joinSubject(subject) {
+  const bare = subjectLabel(subject);
+  if (!state.cluster) return send({ type: 'join', subject: bare });
+  send({ type: 'createSubject', name: `${state.cluster}/${bare}` });
+}
+
+/** Join a cluster, or leave for the open part again. */
+function enterCluster(name) {
+  state.cluster = name && isCluster(name) ? name : null;
+  renderCluster();
+  notify(
+    state.cluster
+      ? `You are in ${state.cluster}. Share the link to bring people in.`
+      : 'Back in the open part of this place.',
+  );
+}
+
+$('cluster-new').addEventListener('click', () => enterCluster(newCluster()));
+$('cluster-leave').addEventListener('click', () => enterCluster(null));
+$('cluster-name').addEventListener('change', (evt) => {
+  const wanted = evt.target.value.trim();
+  if (!wanted) return enterCluster(null);
+  if (!isCluster(wanted)) return notify('That is not a group name. They look like kite-fox-9.');
+  enterCluster(wanted);
+});
+
+// Arriving by link or by camera puts somebody straight into the group.
+enterCluster(clusterFromLink(location.href));
 
 /**
  * Ask what was wrong with a message, then report it.
@@ -909,7 +1053,7 @@ function subjectRow(subject, population, held) {
   toggle.type = 'button';
   toggle.textContent = held ? 'leave' : 'join';
   toggle.addEventListener('click', () =>
-    send({ type: held ? 'leave' : 'join', subject }),
+    held ? send({ type: 'leave', subject }) : joinSubject(subject),
   );
 
   li.append(swatch, name, count, toggle);
@@ -1015,9 +1159,9 @@ $('create').addEventListener('click', () => {
   const existing = state.results?.subjects?.find((s) => s.id === name.toLowerCase());
   if (existing) {
     notify(`"${existing.id}" already exists with ${existing.population} people — joining that one.`);
-    send({ type: 'join', subject: existing.id });
+    joinSubject(existing.id);
   } else {
-    send({ type: 'createSubject', name });
+    send({ type: 'createSubject', name: state.cluster ? `${state.cluster}/${name}` : name });
     notify(`Created "${name}" and joined you to it.`);
   }
   input.value = '';

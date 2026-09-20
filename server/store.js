@@ -17,6 +17,15 @@ import { anchorsFor, ancestorsOf, normalise, radialLayout, resolve } from '../li
 import { knowledge } from '../lib/knowledge.js';
 import { DEFAULT_WORDS, REASON_NAMES, rank, scan } from '../lib/flag.js';
 import { plain } from '../lib/plain.js';
+import { isCluster, split as splitCluster, within } from '../lib/cluster.js';
+import { commitmentInput, entryInput } from '../lib/receipt.js';
+import { createHash } from 'node:crypto';
+
+// Synchronous here because deletion happens on a timer and the sweep should
+// not become asynchronous for the sake of a hash. The browser verifies the
+// same chain with WebCrypto; both sides build the string to be hashed from
+// `lib/receipt.js`, so the two cannot drift.
+const sha = (text) => createHash('sha256').update(String(text)).digest('hex');
 
 /** Computed once: where subjects sit before anybody has joined them. */
 const EXTENT = 1000;
@@ -95,16 +104,34 @@ export class World {
      * mistaking one for the other has to be deliberate.
      */
     /** @type {Set<(report: object) => void>} */ this._reportWatchers = new Set();
+    /** messageId -> who voted which way. One person, one vote, changeable. */
+    /** @type {Map<string, Map<string, 1 | -1>>} */ this.votes = new Map();
+    /**
+     * Every deletion, in order, each entry bound to the one before it.
+     *
+     * Published so that a server which says it forgets on a schedule can be
+     * checked against its own record, and caught if it goes back and edits
+     * that record. It does not and cannot show that no copy was kept
+     * elsewhere; see `lib/receipt.js`, which says so at more length.
+     */
+    /** @type {Array<object>} */ this.deletions = [];
   }
 
   // --- catalogue & membership -------------------------------------------
 
   addSubject(name) {
+    // A cluster prefix is held aside while the rest is tidied up, then put
+    // back. Normalising the whole string would treat `kite-fox-9/art` as one
+    // long subject name and mangle it; the prefix is an address, not a word.
+    const { cluster, subject: bare } = splitCluster(String(name ?? '').trim());
+    if (cluster && !isCluster(cluster)) throw new Error('unusable cluster name');
+
     // `theory of entomology` and `modern entomology` are entomology. Splitting
     // one small community into three rooms over a turn of phrase is the kind
     // of fragmentation nobody would defend if asked directly.
-    const subject = normalise(name, this.hierarchy ?? HIERARCHY);
-    if (!/^[a-z0-9][a-z0-9 -]{0,30}$/.test(subject)) throw new Error('unusable subject name');
+    const tidied = normalise(bare, this.hierarchy ?? HIERARCHY);
+    if (!/^[a-z0-9][a-z0-9 -]{0,30}$/.test(tidied)) throw new Error('unusable subject name');
+    const subject = within(cluster, tidied);
     if (!this.subjects.has(subject) && this.subjects.size >= MAX_SUBJECTS) {
       throw new Error('the catalogue is full');
     }
@@ -631,14 +658,26 @@ export class World {
   forgetOld(now = Date.now()) {
     const cutoff = now - KEEP_FOR;
     let dropped = 0;
+    const gone = [];
 
     for (const [roomKey, log] of this.messages) {
       const keep = log.filter((message) => message.at >= cutoff);
       if (keep.length === log.length) continue;
 
+      for (const message of log) if (message.at < cutoff) gone.push(message);
       dropped += log.length - keep.length;
       if (keep.length) this.messages.set(roomKey, keep);
       else this.messages.delete(roomKey);
+    }
+
+    if (gone.length) this.#receipt(gone, 'expired');
+
+    // A vote is about a message, so it goes when the message does. Keeping
+    // them would slowly fill memory with tallies nothing can display.
+    const alive = new Set();
+    for (const log of this.messages.values()) for (const m of log) alive.add(m.id);
+    for (const messageId of [...this.votes.keys()]) {
+      if (!alive.has(messageId)) this.votes.delete(messageId);
     }
 
     // Reports go too, on their own longer clock. Sweeping them here rather
@@ -657,6 +696,97 @@ export class World {
       }
     }
     return dropped;
+  }
+
+  /**
+   * Write one deletion into the chain.
+   *
+   * Each message is named by a hash of itself rather than by its text, so the
+   * receipt can be handed to anybody without handing them the conversation:
+   * only somebody who already kept the message can recognise it here.
+   */
+  #receipt(messages, reason) {
+    const previous = this.deletions.at(-1)?.hash ?? '';
+    const entry = {
+      seq: this.deletions.length,
+      at: now(),
+      reason,
+      count: messages.length,
+      commitments: messages.map((m) => sha(commitmentInput(m))),
+      previous,
+    };
+    entry.hash = sha(entryInput(entry));
+    this.deletions.push(entry);
+    return entry;
+  }
+
+  /**
+   * Delete a single message now, on request, with a receipt like any other.
+   *
+   * Somebody asking for their own words back is the commonest reason anything
+   * gets deleted early, and it should leave the same trail as the clock does.
+   */
+  forget(userId, messageId) {
+    const found = this.#findMessage(messageId);
+    if (!found) throw new Error('no such message, or it has already been forgotten');
+    if (found.message.authorId !== userId) throw new Error('you can only delete your own');
+
+    const log = this.messages.get(found.roomKey).filter((m) => m.id !== messageId);
+    if (log.length) this.messages.set(found.roomKey, log);
+    else this.messages.delete(found.roomKey);
+    this.votes.delete(messageId);
+
+    return this.#receipt([found.message], 'asked');
+  }
+
+  /** The deletion chain, for anybody who wants to check it. */
+  receipts({ since = 0 } = {}) {
+    return this.deletions.filter((entry) => entry.seq >= since);
+  }
+
+  // --- votes -------------------------------------------------------------
+
+  /**
+   * Up, down, or neither.
+   *
+   * One person one vote, and changing your mind replaces your vote rather than
+   * adding to it. Voting the same way twice takes the vote back, which is what
+   * people expect from a button that is already lit.
+   *
+   * Votes are not moderation. A message everybody dislikes is not a message
+   * that broke a rule, and nothing here feeds `concerns` - the two would
+   * corrupt each other, since the quickest way to get somebody moderated would
+   * otherwise be to organise a few friends.
+   */
+  vote(userId, messageId, value) {
+    if (!this.profiles.has(userId)) throw new Error('no such person');
+    const found = this.#findMessage(messageId);
+    if (!found) throw new Error('no such message, or it has already been forgotten');
+    if (!receives(this.subscription(userId), found.message.subjects)) {
+      throw new Error(`you are not in ${found.roomKey}`);
+    }
+
+    const wanted = Number(value) > 0 ? 1 : Number(value) < 0 ? -1 : 0;
+    const cast = this.votes.get(messageId) ?? new Map();
+
+    if (!wanted || cast.get(userId) === wanted) cast.delete(userId);
+    else cast.set(userId, wanted);
+
+    if (cast.size) this.votes.set(messageId, cast);
+    else this.votes.delete(messageId);
+
+    return { messageId, room: found.roomKey, ...this.tally(messageId, userId) };
+  }
+
+  /** How a message stands, and how this person voted on it. */
+  tally(messageId, userId = null) {
+    const cast = this.votes.get(messageId);
+    if (!cast) return { up: 0, down: 0, score: 0, yours: 0 };
+
+    let up = 0;
+    let down = 0;
+    for (const value of cast.values()) if (value > 0) up += 1; else down += 1;
+    return { up, down, score: up - down, yours: (userId && cast.get(userId)) || 0 };
   }
 
   // --- reports -----------------------------------------------------------

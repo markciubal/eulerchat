@@ -60,6 +60,12 @@
 
         <ol id="log" class="log" aria-live="polite"></ol>
 
+        <p class="public-note" data-help="open">
+          <strong>Everyone can read this.</strong>
+          Anything you send unlocked is public, and anyone can fetch the whole
+          conversation. Tick <em>encrypt</em> to keep a message to the people here.
+        </p>
+
         <form id="composer" class="composer">
           <input
             id="body"
@@ -76,6 +82,24 @@
     </main>
 
     <aside class="rail">
+      <section class="cluster-box" data-help="cluster">
+        <h3>A group of your own</h3>
+        <p id="cluster-now" class="cluster-now">You are in the open part of this place.</p>
+        <div class="cluster-actions">
+          <button id="cluster-new" type="button">make a group</button>
+          <button id="cluster-leave" type="button" hidden>leave it</button>
+        </div>
+        <label class="cluster-join">
+          join one
+          <input id="cluster-name" type="text" autocomplete="off" spellcheck="false"
+                 placeholder="kite-fox-9" />
+        </label>
+        <div id="cluster-share" class="cluster-share" hidden>
+          <p class="cluster-link"><a id="cluster-url" href="#"></a></p>
+          <div id="cluster-qr" class="cluster-qr" aria-label="a square that opens the invitation"></div>
+        </div>
+      </section>
+
       <h2 data-help="interests">your interests</h2>
       <label class="funnel">
         <span data-help="funnel">joining also adds</span>

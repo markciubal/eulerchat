@@ -779,7 +779,7 @@ input:disabled {
 
 /* Present on every message and loud on none of them. Somebody looking for it
    finds it; nobody else is invited to think about moderation while reading. */
-.report {
+.msg-action {
   margin-left: auto;
   border: 0;
   background: none;
@@ -791,18 +791,109 @@ input:disabled {
   opacity: 0;
   transition: opacity 0.12s;
 }
-li:hover .report,
-.report:focus-visible,
-.report[disabled] {
+li:hover .msg-action,
+.msg-action:focus-visible,
+.msg-action[disabled] {
   opacity: 1;
 }
-.report:hover:not([disabled]) {
+.msg-action:hover:not([disabled]) {
   color: var(--warn, #b4472e);
   text-decoration: underline;
 }
-.report[disabled] {
+.msg-action[disabled] {
   cursor: default;
   font-style: italic;
+}
+
+/* Agreeing and disagreeing sit with the message rather than under it, so a
+   long conversation does not become twice as tall as the words in it. */
+.votes {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 0.4rem;
+}
+.votes + .msg-action {
+  margin-left: 0.6rem;
+}
+.vote {
+  border: 0;
+  background: none;
+  padding: 0 0.15rem;
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--muted, #8a8a8a);
+  cursor: pointer;
+}
+.vote:hover {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* The statement that this place is public. It is the one thing on the page
+   somebody must read before they type, so it does not look like help text. */
+.public-note {
+  margin: 0.4rem 0 0.2rem;
+  padding: 0.45rem 0.6rem;
+  border-left: 3px solid var(--warn, #b4472e);
+  background: var(--raised, #fbfaf7);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+/* --- groups -------------------------------------------------------------- */
+
+.cluster-box {
+  margin-bottom: 1rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--line, #d8d4cc);
+}
+.cluster-box h3 {
+  margin: 0 0 0.3rem;
+  font-size: 0.85rem;
+}
+.cluster-now {
+  margin: 0 0 0.4rem;
+  font-size: 0.78rem;
+  color: var(--muted, #8a8a8a);
+}
+.cluster-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+.cluster-join {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted, #8a8a8a);
+}
+.cluster-join input {
+  width: 100%;
+  margin-top: 0.2rem;
+}
+.cluster-link a {
+  font-size: 0.72rem;
+  word-break: break-all;
+}
+
+/* The invitation, drawn as a grid of elements. Not a picture: this place does
+   not do pictures, and a grid of squares is what the thing actually is. */
+.cluster-qr {
+  display: grid;
+  grid-template-columns: repeat(var(--qr-size, 25), 1fr);
+  width: min(11rem, 100%);
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+  background: #fff;
+  border: 1px solid var(--line, #d8d4cc);
+}
+.cluster-qr i {
+  aspect-ratio: 1;
+}
+.qr-on {
+  background: #111;
+}
+.qr-off {
+  background: #fff;
 }
 
 .why {

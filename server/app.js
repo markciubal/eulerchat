@@ -25,6 +25,7 @@ import { populate } from './populate.js';
 import { Sessions } from './sessions.js';
 import { Notifications } from './notifications.js';
 import { parse } from '../lib/regions.js';
+import { createPublicApi } from './public-api.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(here, '..', 'public');
@@ -69,6 +70,28 @@ export function createEulerChat(options = {}) {
    */
   const isModerator =
     typeof options.isModerator === 'function' ? options.isModerator : () => false;
+
+  /**
+   * The open read API and the firehose.
+   *
+   * Mounted before the client is served, because it answers a path of its own
+   * and a static handler that got there first would try to find a file called
+   * `api`. Everything it serves is public by design; see `public-api.js` for
+   * what that decision costs and what it deliberately leaves out.
+   */
+  const api = createPublicApi(world, { mount, basePath: options.apiPath ?? '/api' });
+  if (options.publicApi !== false) server.prependListener('request', api.handleRequest);
+
+  // Everything said, as it is said. Fed from the world's own watcher so that
+  // nothing can reach a room without also reaching the stream - two separate
+  // call sites would eventually disagree about which events exist.
+  world.watch((event) => {
+    if (event.type === 'message') {
+      api.publish({ type: 'message', ...api.publicMessage(event.message, world.tally(event.message.id)) });
+    } else if (event.type === 'room-opened' || event.type === 'room-closed') {
+      api.publish({ type: event.type, room: event.room, at: Date.now() });
+    }
+  });
 
   // A notification only counts as delivered if it reached a live connection;
   // otherwise it is kept for whenever they come back.
@@ -337,7 +360,7 @@ export function createEulerChat(options = {}) {
       bucket.tokens -= cost;
       return true;
     };
-    const PRICE = { createSubject: 10, atlas: 8, overview: 6, post: 2, search: 1, join: 1, leave: 1, funnel: 2, keys: 3, readers: 2, record: 1, report: 4, concerns: 3, concern: 2, clear: 2 };
+    const PRICE = { createSubject: 10, atlas: 8, overview: 6, post: 2, search: 1, join: 1, leave: 1, funnel: 2, keys: 3, readers: 2, record: 1, report: 4, concerns: 3, concern: 2, clear: 2, vote: 1, forget: 2 };
 
     socket.on('message', (raw) => {
       let msg;
@@ -407,6 +430,32 @@ export function createEulerChat(options = {}) {
               send(other.socket, { type: 'key', keyId: session.keyId, publicKey: session.publicKey });
               send(session.socket, { type: 'key', keyId: other.keyId, publicKey: other.publicKey });
             }
+            break;
+          }
+
+          case 'vote': {
+            const result = world.vote(userId, String(msg.messageId ?? ''), msg.value);
+            // To everyone in the room: a tally nobody else sees is not a tally.
+            for (const listener of sessions.reaching(
+              world.audienceFor(parse(result.room), sessions.present()),
+            )) {
+              send(listener.socket, {
+                type: 'votes',
+                messageId: result.messageId,
+                up: result.up,
+                down: result.down,
+                score: result.score,
+              });
+            }
+            break;
+          }
+
+          case 'forget': {
+            const receipt = world.forget(userId, String(msg.messageId ?? ''));
+            for (const listener of sessions) {
+              send(listener.socket, { type: 'forgotten', messageId: String(msg.messageId ?? '') });
+            }
+            send(socket, { type: 'receipt', receipt });
             break;
           }
 
@@ -589,12 +638,16 @@ export function createEulerChat(options = {}) {
       watchWords: (words) => world.watchWords(words),
     },
 
+    /** The open read API: rooms, logs, scrape, receipts, firehose. */
+    api,
+
     /** Serve the bundled client from wherever the host prefers. */
     handleRequest,
     server,
     wss,
     close() {
       closed = true;
+      api.close();
       notifications.close();
       clearInterval(sweeper);
       clearInterval(heartbeat);

@@ -88,27 +88,73 @@ export const HELP = {
       'that happens this says so rather than quietly showing you something wrong. It ' +
       'does not affect anything you can do — you can ignore it.',
   },
-  privacy: {
-    title: 'Encrypting what you send',
+  open: {
+    title: 'This place is public',
     short:
-      'Your messages are locked before they leave, with a different key each time, and ' +
-      'only the people in the conversation can unlock them. The server passes them on ' +
-      'without being able to read them.',
+      'Anything you say here without locking it can be read by anyone at all, not just '
+      + 'the people in the conversation. There is an address that hands out every '
+      + 'conversation to whoever asks for it.',
     more:
-      'It does not stop the people you are talking to. They can read it — that is the ' +
-      'point — and nothing can stop them keeping a copy. It also does not hide who you ' +
-      'are talking to or when. What it does is make the server useless to anyone who ' +
-      'breaks into it later.',
+      'That is on purpose: it is what lets other people build things on top of this, and '
+      + 'it is how the whole of it can be read and searched. It does mean you should treat '
+      + 'anything you type here as something you have said out loud in the street. If you '
+      + 'want a conversation that is not like that, lock it, and only the people here will '
+      + 'be able to read it.',
+  },
+  privacy: {
+    title: 'Locking what you send',
+    short:
+      'Locked messages are scrambled before they leave, with a different key each time, '
+      + 'and only the people in the conversation can unscramble them. Everything you send '
+      + 'unlocked is public.',
+    more:
+      'This is the only thing here that keeps anything private, so it matters more than it '
+      + 'looks. What it does not do: it does not stop the people you are talking to, who '
+      + 'can read it and can keep a copy forever, and it does not hide who you are talking '
+      + 'to or when. If a message cannot be locked it is not sent at all, rather than sent '
+      + 'in the open.',
   },
   recording: {
     title: 'Keeping your own copy',
     short:
-      'Your browser keeps what is said here, so you still have it after the server ' +
-      'forgets. The server forgets everything after twelve hours.',
+      'Your browser keeps what is said here, so you still have it after the server '
+      + 'forgets. The server forgets everything after twelve hours.',
     more:
-      'This is about your copy only. Everybody else chooses for themselves, and somebody ' +
-      'who wants a record of a conversation will have one whatever you or we set — so ' +
-      'treat anything you say here as something that can be kept.',
+      'This is about your copy only. Everybody else chooses for themselves, and because '
+      + 'anyone can read this place and keep what they read, a record of anything said '
+      + 'here will exist whatever you or we set. Treat anything you say as something that '
+      + 'has been kept.',
+  },
+  deletion: {
+    title: 'What the server forgets',
+    short:
+      'The server drops everything after twelve hours and writes down what it dropped, '
+      + 'so you can check that it did.',
+    more:
+      'Each entry in that record is tied to the one before it, so the list cannot be gone '
+      + 'back over and quietly changed. If you kept your own copy of a message you can '
+      + 'check it is named there. What no record can show you is that nobody kept a copy '
+      + 'somewhere else — and here, where anyone can read along, somebody probably has.',
+  },
+  cluster: {
+    title: 'A small group of your own',
+    short:
+      'Make a group with its own name, and share the link or the square so a few people '
+      + 'can join it. Only people who have it end up in there with you.',
+    more:
+      'It is a door with a name rather than a lock: anyone who has the name can walk in, '
+      + 'and anyone you share it with can share it on. Good for the six people at your '
+      + 'table, not for anything that would matter if a stranger read it. What is said '
+      + 'inside is still public unless you lock it.',
+  },
+  votes: {
+    title: 'Agreeing and disagreeing',
+    short:
+      'Say whether something was worth saying. Press the same one again to take it back.',
+    more:
+      'It is not a way of reporting somebody. A message plenty of people disagree with is '
+      + 'not a message that broke a rule, and nothing here treats it as one — if it did, '
+      + 'a few friends voting together would be enough to get somebody in trouble.',
   },
   reporting: {
     title: 'Reporting a message',
