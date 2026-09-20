@@ -31,6 +31,8 @@ const state = {
   /** messageId -> {up, down, score} as everyone else sees it. */
   votes: new Map(),
   cluster: null,
+  /** The message being replied to, if any. */
+  replyTo: null,
   written: [],
   viewBox: null,
   overview: null,
@@ -610,6 +612,27 @@ function renderRoom() {
     });
   }
 
+  // Replying is easy to start by accident and confusing to be stuck in, so
+  // what you are replying to is shown with the way out next to it.
+  const replying = $('replying');
+  if (state.replyTo && state.replyTo.room === room.key) {
+    replying.hidden = false;
+    replying.textContent = '';
+    replying.append(document.createTextNode(`replying to ${state.replyTo.author}`));
+    const stop = document.createElement('button');
+    stop.type = 'button';
+    stop.className = 'stop-replying';
+    stop.textContent = 'not a reply';
+    stop.addEventListener('click', () => {
+      state.replyTo = null;
+      renderRoom();
+    });
+    replying.append(stop);
+  } else {
+    if (state.replyTo && state.replyTo.room !== room.key) state.replyTo = null;
+    replying.hidden = true;
+  }
+
   const messages = state.history[room.key] ?? [];
   if (!messages.length) {
     const empty = document.createElement('li');
@@ -639,6 +662,20 @@ function renderRoom() {
     const text = document.createElement('p');
     text.className = 'text';
     text.textContent = m.body;
+
+    // What this was a reply to, quoted from when it was sent rather than
+    // looked up now: the original may be gone, and a reply to nothing reads
+    // as a non-sequitur.
+    let quoted = null;
+    if (m.replyTo) {
+      quoted = document.createElement('p');
+      quoted.className = 'quoted';
+      const who = document.createElement('strong');
+      who.textContent = `${m.replyTo.author}: `;
+      quoted.append(who, document.createTextNode(
+        m.replyTo.sealed ? '(a locked message)' : m.replyTo.excerpt,
+      ));
+    }
 
     head.append(who, at);
     if (m.sealed) {
@@ -698,7 +735,23 @@ function renderRoom() {
       head.append(flag);
     }
 
-    li.append(head, text);
+    // Replying to somebody, which is the ordinary way a conversation with
+    // more than two people in it stays followable.
+    const reply = document.createElement('button');
+    reply.type = 'button';
+    reply.className = 'msg-action reply';
+    reply.textContent = 'reply';
+    reply.title = `Reply to ${m.author}`;
+    reply.addEventListener('click', () => {
+      state.replyTo = m;
+      renderRoom();
+      $('body').focus();
+    });
+    head.append(reply);
+
+    li.append(head);
+    if (quoted) li.append(quoted);
+    li.append(text);
     log.append(li);
   }
   log.scrollTop = log.scrollHeight;
@@ -742,9 +795,13 @@ $('composer').addEventListener('submit', (evt) => {
   // two conditions used to be one `if`, so a message typed before the keys
   // had finished being made — which is a real window, not a theoretical one —
   // went out unlocked from a page with the box ticked.
+  const replyTo = state.replyTo?.room === room.key ? state.replyTo.id : undefined;
+
   if (!state.sealing) {
     body.value = '';
-    send({ type: 'post', tags: room.subjects, body: text });
+    state.replyTo = null;
+    send({ type: 'post', tags: room.subjects, body: text, replyTo });
+    renderRoom();
     return;
   }
 
@@ -787,7 +844,8 @@ $('composer').addEventListener('submit', (evt) => {
     }
 
     const envelope = await seal(text, me, readers);
-    send({ type: 'post', tags: room.subjects, body: '', envelope });
+    send({ type: 'post', tags: room.subjects, body: '', envelope, replyTo });
+    state.replyTo = null;
     notify('');
     // Cleared now that it has actually gone — and only if they have not
     // started writing something else while they waited.

@@ -585,6 +585,7 @@ export function createEulerChat(options = {}) {
           case 'post': {
             const message = world.post(userId, msg.tags ?? [], msg.body, {
               envelope: msg.envelope ?? null,
+              replyTo: msg.replyTo ?? null,
             });
             // Only people with a connection open can be sent anything, so the
             // audience search is narrowed to them rather than to every member.

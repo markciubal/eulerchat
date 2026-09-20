@@ -1001,6 +1001,22 @@ export class World {
       at: now(),
     };
 
+    // Replying to something. Held as an id plus enough of the original to
+    // show, because the thing being replied to may be deleted before this is
+    // read - and a reply to nothing is a conversation with a hole in it.
+    if (options.replyTo) {
+      const parent = this.#findMessage(String(options.replyTo));
+      if (parent && parent.roomKey === roomKey) {
+        message.replyTo = {
+          id: parent.message.id,
+          author: parent.message.author,
+          // A sealed parent has nothing readable to quote, so nothing is quoted.
+          excerpt: parent.message.sealed ? '' : parent.message.body.slice(0, 120),
+          sealed: Boolean(parent.message.sealed),
+        };
+      }
+    }
+
     // A sealed message travels and is stored as an envelope. The server holds
     // it, routes it and forgets it on schedule, and at no point can open it —
     // which also means it cannot see a name in it, so a sealed message can

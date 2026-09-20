@@ -314,3 +314,118 @@ test('the open API only reads', async () => {
     stop();
   }
 });
+
+// --- replies and the wire for votes ----------------------------------------
+
+test('a reply quotes what it answered, even after that is deleted', () => {
+  const world = new World();
+  world.addSubject('art');
+  const asker = world.addUser('asker');
+  const answerer = world.addUser('answerer');
+  world.join(asker, 'art');
+  world.join(answerer, 'art');
+
+  const question = world.post(asker, ['art'], 'is akrasia a failure of reason or of desire?');
+  const answer = world.post(answerer, ['art'], 'of desire, surely', { replyTo: question.id });
+
+  assert.equal(answer.replyTo.author, 'asker');
+  assert.match(answer.replyTo.excerpt, /akrasia/);
+
+  // The quote is taken when the reply is made, not looked up when it is read,
+  // so deleting the original leaves the answer still making sense.
+  world.forget(asker, question.id);
+  assert.match(world.messages.get('art')[0].replyTo.excerpt, /akrasia/);
+});
+
+test('a reply to a locked message quotes nothing', () => {
+  const world = new World();
+  world.addSubject('art');
+  const one = world.addUser('one');
+  const two = world.addUser('two');
+  world.join(one, 'art');
+  world.join(two, 'art');
+
+  const sealed = world.post(one, ['art'], '', { envelope: { sealed: true, body: 'x', keys: {} } });
+  const reply = world.post(two, ['art'], 'agreed', { replyTo: sealed.id });
+
+  // There is nothing readable to quote, and inventing something would put
+  // words in a message the server cannot read.
+  assert.equal(reply.replyTo.excerpt, '');
+  assert.equal(reply.replyTo.sealed, true);
+});
+
+test('a reply across rooms is not a reply', () => {
+  const world = new World();
+  for (const s of ['art', 'music']) world.addSubject(s);
+  const person = world.addUser('person');
+  world.join(person, 'art');
+  world.join(person, 'music');
+
+  const elsewhere = world.post(person, ['music'], 'said in another room');
+  const here = world.post(person, ['art'], 'said here', { replyTo: elsewhere.id });
+
+  // Quoting across rooms would carry words out of the room they were said in,
+  // to people who were never in it.
+  assert.equal(here.replyTo, undefined);
+});
+
+test('a vote reaches everybody in the room', async () => {
+  const world = new World();
+  world.addSubject('art');
+  const host = http.createServer((req, res) => {
+    if (!res.headersSent) res.writeHead(404).end('{}');
+  });
+  const chat = createEulerChat({ world, server: host });
+  const port = await listen(host);
+
+  const open = (url) => {
+    const socket = new WebSocket(url);
+    const seen = [];
+    return {
+      seen,
+      ready: new Promise((res, rej) => {
+        socket.addEventListener('open', res);
+        socket.addEventListener('error', rej);
+      }),
+      send: (f) => socket.send(JSON.stringify(f)),
+      close: () => socket.close(),
+      wait: async (match, limit = 5000) => {
+        const until = Date.now() + limit;
+        while (Date.now() < until) {
+          const hit = seen.find(match);
+          if (hit) return hit;
+          await new Promise((r) => setTimeout(r, 10));
+        }
+        throw new Error(`nothing matched; saw ${seen.map((f) => f.type).join(', ')}`);
+      },
+      socket,
+    };
+  };
+
+  const author = open(`ws://127.0.0.1:${port}`);
+  const voter = open(`ws://127.0.0.1:${port}`);
+  author.socket.addEventListener('message', (e) => author.seen.push(JSON.parse(e.data)));
+  voter.socket.addEventListener('message', (e) => voter.seen.push(JSON.parse(e.data)));
+
+  try {
+    await Promise.all([author.ready, voter.ready]);
+    for (const who of [author, voter]) who.send({ type: 'join', subject: 'art' });
+    const joined = (f) => f.type === 'state' && f.subscription.includes('art');
+    await Promise.all([author.wait(joined), voter.wait(joined)]);
+
+    author.send({ type: 'post', tags: ['art'], body: 'a thought' });
+    const delivered = await voter.wait((f) => f.type === 'message');
+
+    voter.send({ type: 'vote', messageId: delivered.message.id, value: 1 });
+
+    // Both of them, not only the person who pressed it: a tally only the voter
+    // can see is not a tally.
+    assert.equal((await voter.wait((f) => f.type === 'votes')).score, 1);
+    assert.equal((await author.wait((f) => f.type === 'votes')).score, 1);
+  } finally {
+    author.close();
+    voter.close();
+    chat.close();
+    host.close();
+  }
+});

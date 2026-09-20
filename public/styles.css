@@ -945,3 +945,33 @@ li:hover .msg-action,
   color: var(--muted, #8a8a8a);
   cursor: pointer;
 }
+
+/* --- replies ------------------------------------------------------------- */
+
+/* What a message was answering, quoted from when it was sent. Set back and
+   smaller, so a thread reads as a conversation rather than as a stack of
+   equally loud statements. */
+.quoted {
+  margin: 0.1rem 0 0.15rem 0.6rem;
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--line, #d8d4cc);
+  font-size: 0.76rem;
+  color: var(--muted, #8a8a8a);
+}
+.replying {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.3rem 0 0;
+  font-size: 0.76rem;
+  color: var(--muted, #8a8a8a);
+}
+.stop-replying {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--warn, #b4472e);
+  cursor: pointer;
+  text-decoration: underline;
+}
