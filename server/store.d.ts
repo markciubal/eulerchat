@@ -2,6 +2,7 @@ import type {
   Atlas,
   Census,
   Concern,
+  Receipt,
   Envelope,
   Layout,
   Reason,
@@ -165,6 +166,42 @@ export class World {
 
   /** roomKey -> the reports held about it. */
   reports: Map<RegionKey, Report[]>;
+
+  // --- votes -------------------------------------------------------------
+
+  /**
+   * Up, down, or neither. Pressing the same way twice takes the vote back.
+   *
+   * Votes are not moderation and feed nothing that is: a message people
+   * dislike is not a message that broke a rule.
+   */
+  vote(userId: string, messageId: string, value: number): {
+    messageId: string;
+    room: RegionKey;
+    up: number;
+    down: number;
+    score: number;
+    yours: number;
+  };
+
+  /** How a message stands, and how this person voted on it. */
+  tally(messageId: string, userId?: string | null): {
+    up: number;
+    down: number;
+    score: number;
+    yours: number;
+  };
+
+  // --- deletion ----------------------------------------------------------
+
+  /** Delete your own message now, with a receipt like any other. */
+  forget(userId: string, messageId: string): Receipt;
+
+  /** The deletion chain, for anybody who wants to check it. */
+  receipts(options?: { since?: number }): Receipt[];
+
+  /** Every deletion so far, in order. */
+  deletions: Receipt[];
   /** Who a message reaches: user ids, never connections. */
   audienceFor(tags: Iterable<string>, among?: Iterable<string>): string[];
   historyFor(userId: string): Record<RegionKey, Message[]>;

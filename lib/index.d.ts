@@ -493,3 +493,95 @@ export function rank(
   }>,
   options?: { now?: number; window?: number },
 ): Concern[];
+
+// --- words only ------------------------------------------------------------
+
+/** What `plain` took out, and what is left. */
+export interface Plain {
+  /** The text with every picture and pictograph removed. */
+  text: string;
+  emoji: number;
+  images: number;
+  changed: boolean;
+  /** Nothing but pictures: there is no message left to send. */
+  empty: boolean;
+}
+
+/**
+ * Remove images and emoji, and say what was removed.
+ *
+ * Removal rather than refusal: losing a whole message over one character is a
+ * worse outcome than dropping the character. The browser does this as somebody
+ * types, so nobody is edited without seeing it happen.
+ */
+export function plain(text: string | null | undefined): Plain;
+
+/** Whether there is anything here that is not words. */
+export function hasPictographs(text: string | null | undefined): boolean;
+
+/** What to tell somebody whose message was cleaned, or null if it was not. */
+export function saidAbout(result: Plain): string | null;
+
+// --- small groups ----------------------------------------------------------
+
+/**
+ * A cluster is a name in front of a subject: `kite-fox-9/art`. Containment
+ * keeps clustered and unclustered subjects apart without knowing that clusters
+ * exist, because they are simply different subjects.
+ *
+ * It is a door with a name, not a lock. Anyone holding the name is in.
+ */
+export function newCluster(random?: () => number): string;
+export function isCluster(name: string | null | undefined): boolean;
+export function split(subject: string): { cluster: string | null; subject: string };
+export function within(cluster: string | null, subject: string): string;
+export function clusterOf(subject: string): string | null;
+/** The subject without the cluster in front of it, for showing to people. */
+export function label(subject: string): string;
+export function inviteLink(origin: string, cluster: string): string;
+export function clusterFromLink(href: string): string | null;
+
+// --- deletion receipts -----------------------------------------------------
+
+/**
+ * One deletion, bound to the one before it.
+ *
+ * Messages are named by a hash rather than by their text, so the chain can be
+ * published without republishing the conversations it is about.
+ */
+export interface Receipt {
+  seq: number;
+  at: number;
+  reason: 'expired' | 'asked' | string;
+  count: number;
+  commitments: string[];
+  previous: string;
+  hash: string;
+}
+
+/** SHA-256 of a string, as hex. */
+export function digest(text: string): Promise<string>;
+
+/** What a message is called in a receipt, and the string that is hashed. */
+export function commitmentInput(message: unknown): string;
+export function commitment(message: unknown): Promise<string>;
+export function entryInput(entry: Partial<Receipt>): string;
+
+/**
+ * Recompute every hash and follow every link.
+ *
+ * This detects a chain that has been edited after the fact. It does NOT show
+ * that no copy of a deleted message was kept elsewhere, and nothing can.
+ */
+export function verify(chain: Receipt[] | null | undefined): Promise<{
+  ok: boolean;
+  problems: string[];
+  head: string;
+  length: number;
+}>;
+
+/** Whether a message you kept is named in a receipt, and which one. */
+export function findDeletion(
+  message: unknown,
+  chain: Receipt[] | null | undefined,
+): Promise<{ deleted: boolean; at: number | null; seq: number | null; reason: string | null }>;

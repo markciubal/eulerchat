@@ -74,6 +74,26 @@
     "./seal": {
       "types": "./lib/index.d.ts",
       "default": "./lib/seal.js"
+    },
+    "./plain": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/plain.js"
+    },
+    "./cluster": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/cluster.js"
+    },
+    "./receipt": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/receipt.js"
+    },
+    "./flag": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/flag.js"
+    },
+    "./public-api": {
+      "types": "./server/app.d.ts",
+      "default": "./server/public-api.js"
     }
   },
   "bin": {
