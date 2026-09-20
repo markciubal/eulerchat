@@ -598,6 +598,12 @@ function renderRail() {
   }
 
   $('rail-total').textContent = `${rail.total.toLocaleString()} interests · search to find more`;
+  // Setting `.value` on a select is not universally writable; marking the
+  // option is, and works the same everywhere.
+  const reach = String(state.diagram.funnel ?? 0);
+  if (document.activeElement !== $('funnel')) {
+    for (const option of $('funnel').options ?? []) option.selected = option.value === reach;
+  }
 }
 
 // Search rather than scroll: at a thousand interests the list is not the way
@@ -622,6 +628,10 @@ $('find').addEventListener('submit', (evt) => {
   send({ type: 'createSubject', name: input.value });
   input.value = '';
   state.results = null;
+});
+
+$('funnel').addEventListener('change', (evt) => {
+  send({ type: 'funnel', reach: Number(evt.target.value) });
 });
 
 $('name').addEventListener('change', (evt) => {

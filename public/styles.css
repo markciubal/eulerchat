@@ -576,3 +576,25 @@ input:disabled {
   fill: var(--accent);
   font-size: 17px;
 }
+
+/* --- funnel --- */
+
+.funnel {
+  display: block;
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.funnel select {
+  display: block;
+  width: 100%;
+  margin-top: 3px;
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--ink);
+}

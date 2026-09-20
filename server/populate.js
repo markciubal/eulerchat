@@ -97,10 +97,15 @@ export function populate(world, options = {}) {
   for (let u = 0; u < users; u++) {
     const userId = world.addUser(`p${u}`);
     const home = themes[Math.floor(random() * themes.length)];
-    const wanted = minInterests + Math.floor(random() * (maxInterests - minInterests + 1));
+    // Never ask for more distinct interests than exist. Wanting six out of a
+    // catalogue of three is a loop that cannot finish, and it hung the whole
+    // test suite the first time anyone built a small world.
+    const ceiling = Math.min(catalogue.length, maxInterests);
+    const floor = Math.min(minInterests, ceiling);
+    const wanted = floor + Math.floor(random() * (ceiling - floor + 1));
 
     const held = new Set();
-    while (held.size < wanted) {
+    for (let tries = 0; held.size < wanted && tries < wanted * 40; tries++) {
       const pool = random() < importChance ? themes[Math.floor(random() * themes.length)] : home;
       held.add(pick(pool));
     }

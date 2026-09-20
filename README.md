@@ -194,6 +194,7 @@ Importing this does not bind a port or read `process.argv`. The CLI
 | `eulerchat/knowledge` | a small default hierarchy |
 | `eulerchat/mold` | `Mold`, `weave` — what grows between them |
 | `eulerchat/abbrev` | `shortLabels`, `abbreviate` — naming the overlaps |
+| `eulerchat/knowledge` | the bundled hierarchy, and `subfields()` |
 | `eulerchat/app` | `createEulerChat` |
 | `eulerchat/store` | `World`, `seed` |
 
@@ -442,6 +443,36 @@ divisions, the fields within them, and beneath those the subfields — and it is
 the subfields people join. Somebody joins `entomology`, not `biology`; the
 field above it is there to say where entomology *is*, so that it sits beside
 mycology and nowhere near topology before a single person has joined either.
+
+### The funnel: joining narrow without being alone
+
+A catalogue of two hundred subfields is finer-grained than most communities
+are large. The person in entomology and the person in mycology share nothing
+at all as far as the rooms are concerned — which is true of their subjects and
+false of them, and the reason they never meet.
+
+So a join can carry upward:
+
+```js
+world.setFunnel(userId, 1);        // 0 = just this, 1 = + its field, 2 = + its division
+world.join(userId, 'entomology');  // -> entomology, biology
+```
+
+Both now hold `biology` and have somewhere to find each other, without either
+having to claim their real interest is something broader than it is. Their own
+rooms are untouched — widening adds, it does not replace — and the broader
+room is created if the catalogue has not got it yet, because a funnel that
+quietly does nothing whenever the field happens to be missing is worse than no
+funnel. It never reaches the root: a room containing everybody is not a room.
+
+### Hobbies, not only fields
+
+The taxonomy is academic in structure and not in content. Hobbies are the
+largest division in it — handcraft, cooking, games, outdoors, growing,
+movement, tinkering, collections, playing music, writing — because a catalogue
+that only admits scholarship has nothing to offer somebody who came for bread
+and bicycles. Same three layers, so a hobby funnels upward exactly as a
+subfield does.
 
 ### A facet is not a different subject
 

@@ -222,7 +222,7 @@ export function createEulerChat(options = {}) {
       bucket.tokens -= cost;
       return true;
     };
-    const PRICE = { createSubject: 10, atlas: 8, overview: 6, post: 2, search: 1, join: 1, leave: 1 };
+    const PRICE = { createSubject: 10, atlas: 8, overview: 6, post: 2, search: 1, join: 1, leave: 1, funnel: 2 };
 
     socket.on('message', (raw) => {
       let msg;
@@ -276,6 +276,16 @@ export function createEulerChat(options = {}) {
 
           case 'leave': {
             world.leave(userId, String(msg.subject));
+            pushDiagrams();
+            break;
+          }
+
+          case 'funnel': {
+            // How far a join should carry from now on. Existing memberships
+            // are left alone — widening is something you choose to do next,
+            // not something that reaches back and changes what you already
+            // joined.
+            world.setFunnel(userId, msg.reach);
             pushDiagrams();
             break;
           }

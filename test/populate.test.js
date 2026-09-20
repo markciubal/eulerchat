@@ -51,19 +51,30 @@ test('at a thousand interests people still land in overlaps', () => {
   assert.ok(share > 0.9, `only ${(share * 100).toFixed(0)}% of people can see an overlap`);
 });
 
-test('a view costs about the same at a thousand interests as at three', () => {
+test('a view costs about the same however big the catalogue is', () => {
   // The neighbourhood projection means the solver never sees more than three
   // circles, so the cost of a view is bounded by the view rather than by the
   // size of the catalogue. This is the load-bearing claim for scale.
-  const world = big();
-  const sample = [...world.members.keys()].filter((_, i) => i % 40 === 0);
+  // Measured against a tiny world rather than against a stopwatch. An absolute
+  // threshold here failed under load while passing alone, which is the kind of
+  // test that teaches people to re-run rather than to look; the claim was
+  // always a ratio anyway.
+  const cost = (world) => {
+    const sample = [...world.members.keys()].filter((_, i) => i % 40 === 0).slice(0, 24);
+    world.diagramFor(sample[0]); // warm the census and index
+    const started = performance.now();
+    for (const userId of sample) world.diagramFor(userId);
+    return (performance.now() - started) / sample.length;
+  };
 
-  world.diagramFor(sample[0]); // warm the census and index
-  const started = performance.now();
-  for (const userId of sample) world.diagramFor(userId);
-  const each = (performance.now() - started) / sample.length;
+  // Against a realistic small catalogue rather than a degenerate one. Three
+  // subjects is a view with nothing in it to solve, so measuring against that
+  // was measuring the solver's floor, not how the cost grows.
+  const modest = populate(new World(), { subjects: 40, users: 2000, chatter: 0 });
+  const wide = big();
 
-  assert.ok(each < 25, `each view took ${each.toFixed(1)}ms`);
+  const ratio = cost(wide) / Math.max(cost(modest), 0.01);
+  assert.ok(ratio < 4, `a view costs ${ratio.toFixed(1)}x more at a thousand interests than at forty`);
 });
 
 test('a session is only redrawn when its own picture moves', () => {

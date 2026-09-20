@@ -9,6 +9,7 @@
  */
 
 import { RANK, QUIET, byUrgency, classify, defaults } from '../lib/notify.js';
+import { parse } from '../lib/regions.js';
 
 const HELD = 50;
 
@@ -113,7 +114,12 @@ export class Notifications {
     const room = event.room;
     if (!room) return;
 
-    for (const [userId] of this.world.members) {
+    // Only the people who can already read the room are candidates, and the
+    // world can now name them without walking every member. `classify` checks
+    // containment again for each — the rule that a notification never mentions
+    // a room somebody is not in is worth enforcing twice, because it is the
+    // one that leaks conversations.
+    for (const userId of this.world.audienceFor(parse(room))) {
       const note = classify(event, {
         ...this.settings(userId),
         userId,

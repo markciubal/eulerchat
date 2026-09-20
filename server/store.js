@@ -13,12 +13,14 @@ import {
 } from '../lib/regions.js';
 import { layout } from '../lib/euler.js';
 import { atlas } from '../lib/atlas.js';
-import { anchorsFor, normalise, radialLayout, resolve } from '../lib/taxonomy.js';
+import { anchorsFor, ancestorsOf, normalise, radialLayout, resolve } from '../lib/taxonomy.js';
 import { knowledge } from '../lib/knowledge.js';
 
 /** Computed once: where subjects sit before anybody has joined them. */
 const EXTENT = 1000;
 const HIERARCHY = radialLayout(knowledge, { extent: EXTENT });
+
+const EMPTY = new Set();
 
 const now = () => Date.now();
 const id = () => crypto.randomUUID().slice(0, 8);
@@ -44,6 +46,8 @@ export class World {
     /** @type {Map<string, Array>} */ this.messages = new Map();
     this._census = null;
     this._layouts = new Map();
+    /** subject -> who holds it. An inverted index; see `audienceFor`. */
+    this._holders = new Map();
     /** @type {Set<(event: object) => void>} */ this._watchers = new Set();
   }
 
@@ -75,7 +79,7 @@ export class World {
     return this.members.get(userId) ?? new Set();
   }
 
-  join(userId, subject) {
+  join(userId, subject, options = {}) {
     if (!this.subjects.has(subject)) throw new Error(`no such subject: ${subject}`);
     const held = this.members.get(userId);
     if (!held || held.has(subject)) return;
@@ -97,7 +101,55 @@ export class World {
     // one event this design has that no flat chat model does never fired.
     const opened = this.#touch(held, subject, +1);
     held.add(subject);
+    this.#hold(subject).add(userId);
     this.#flush(opened);
+
+    this.#funnel(userId, subject, options.reach ?? this.profiles.get(userId)?.reach ?? 0);
+  }
+
+  /**
+   * Widen a join upward: also join the broader subjects this one sits inside.
+   *
+   * A catalogue of two hundred subfields is finer-grained than most
+   * communities are large, so the person in entomology and the person in
+   * mycology never meet — they share nothing, which is true of their subjects
+   * and false of them. Reaching a step up puts them both in biology without
+   * either having to claim their real interest is something broader.
+   *
+   * The broader room is created if it does not exist yet, because a funnel
+   * that quietly does nothing when the field happens to be missing is worse
+   * than no funnel.
+   */
+  #funnel(userId, subject, reach) {
+    if (reach <= 0) return;
+    const held = this.members.get(userId);
+
+    for (const broader of ancestorsOf(subject, knowledge, reach)) {
+      if (!held || held.size >= MAX_SUBSCRIPTIONS) break;
+      if (!this.subjects.has(broader)) {
+        if (this.subjects.size >= MAX_SUBJECTS) break;
+        this.subjects.add(broader);
+      }
+      this.join(userId, broader, { reach: 0 });
+    }
+  }
+
+  /**
+   * How far up a join should carry, for this person, from now on.
+   *
+   * A preference rather than a property of the subject: somebody who wants
+   * only the people who share their exact interest and somebody who wants the
+   * whole field are both asking for something reasonable.
+   */
+  setFunnel(userId, reach) {
+    const profile = this.profiles.get(userId);
+    if (!profile) return 0;
+    profile.reach = Math.max(0, Math.min(2, Number(reach) || 0));
+    return profile.reach;
+  }
+
+  funnel(userId) {
+    return this.profiles.get(userId)?.reach ?? 0;
   }
 
   leave(userId, subject) {
@@ -105,6 +157,11 @@ export class World {
     if (!held || !held.has(subject)) return;
 
     held.delete(subject);
+    const holders = this._holders.get(subject);
+    if (holders) {
+      holders.delete(userId);
+      if (!holders.size) this._holders.delete(subject);
+    }
     this.#flush(this.#touch(held, subject, -1));
   }
 
@@ -162,6 +219,12 @@ export class World {
       if (this._index) this.#reindex(region, k, next);
     }
     return events;
+  }
+
+  #hold(subject) {
+    let holders = this._holders.get(subject);
+    if (!holders) this._holders.set(subject, (holders = new Set()));
+    return holders;
   }
 
   /** Announce a batch of events, once the change they describe has landed. */
@@ -325,6 +388,7 @@ export class World {
       hidden,
       suggested,
       subscription: [...held].sort(),
+      funnel: this.funnel(userId),
       rail: this.rail(held, suggested),
     };
   }
@@ -513,13 +577,40 @@ export class World {
    * `among` narrows the search, since a caller with connections open knows the
    * few thousand members can be skipped in favour of the few dozen present.
    */
-  audienceFor(tags, among = this.members.keys()) {
+  audienceFor(tags, among = null) {
     const room = canonical(tags);
+    if (!room.length) return [];
+
+    // Walking every member to find the few who hold a room cost a millisecond
+    // a message, which the notifier then paid on behalf of all four thousand
+    // of them. But the audience for a room cannot be larger than the smallest
+    // of its subjects, so the smallest is the only set worth walking — sorting
+    // the subjects by how few people hold them turns a scan of the world into
+    // a scan of the rarest thing in the room.
+    //
+    // `among` narrows the answer, not the search. Letting the caller's list
+    // drive the scan was slower than this whenever the rarest subject in the
+    // room had fewer holders than they had candidates, which for any room
+    // worth notifying about is most of the time.
+    const sets = room.map((s) => this._holders.get(s) ?? EMPTY);
+    sets.sort((a, b) => a.size - b.size);
+    if (!sets[0].size) return [];
+
     const out = [];
-    for (const userId of among) {
-      if (receives(this.subscription(userId), room)) out.push(userId);
+    for (const userId of sets[0]) {
+      let everywhere = true;
+      for (let i = 1; i < sets.length; i++) {
+        if (!sets[i].has(userId)) {
+          everywhere = false;
+          break;
+        }
+      }
+      if (everywhere) out.push(userId);
     }
-    return out;
+
+    if (!among) return out;
+    const present = among instanceof Set ? among : new Set(among);
+    return out.filter((userId) => present.has(userId));
   }
 
   /** Backlog for every room this person can see, newest last. */
