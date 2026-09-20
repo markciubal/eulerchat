@@ -94,6 +94,10 @@
     "./public-api": {
       "types": "./server/app.d.ts",
       "default": "./server/public-api.js"
+    },
+    "./qr": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/qr.js"
     }
   },
   "bin": {

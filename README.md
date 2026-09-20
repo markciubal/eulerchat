@@ -211,6 +211,7 @@ rooms over your own transport, and building an atlas.
 | `eulerchat/receipt` | `verify`, `findDeletion` — checking what was deleted |
 | `eulerchat/flag` | `scan`, `rank`, `REASONS` — which rooms need looking at |
 | `eulerchat/public-api` | `createPublicApi` — the open read side and the firehose |
+| `eulerchat/qr` | `qr`, `toText` — the invitation as a square |
 | `eulerchat/knowledge` | the bundled hierarchy, and `subfields()` |
 | `eulerchat/adapt` | `fromRows` — read the tables you already have |
 | `eulerchat/embed` | `mountMap`, `viewFor` — the map in an element you own |
@@ -380,7 +381,10 @@ inviteLink('https://example.com/', group);
 ```
 
 Share the link, or the square beside it, which is drawn as a grid of elements
-rather than as a picture. **It is a door with a name, not a lock**: anyone who
+rather than as a picture. The encoder is checked cell for cell against an
+independent implementation across every version and error-correction level it
+supports, and across all eight data masks — though no phone has been pointed at
+one, so that is bit-exact agreement rather than a scan. **It is a door with a name, not a lock**: anyone who
 has the name can walk in, and anyone you share it with can share it onward.
 Right for the six people at your table; wrong for anything that would matter if
 a stranger read it. What is said inside is still public unless it is locked.

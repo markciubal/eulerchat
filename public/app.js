@@ -6,6 +6,7 @@ import { available, identity, seal, unseal } from '../lib/seal.js';
 import { REASONS } from '../lib/flag.js';
 import { plain, saidAbout } from '../lib/plain.js';
 import { clusterFromLink, clusterOf, inviteLink, isCluster, label as subjectLabel, newCluster } from '../lib/cluster.js';
+import { qr } from '../lib/qr.js';
 
 const $ = (id) => document.getElementById(id);
 const svg = $('diagram');
@@ -891,9 +892,8 @@ function renderCluster() {
 function drawInvite(link) {
   const holder = $('cluster-qr');
   holder.textContent = '';
-  if (!state.qr) return; // the encoder has not loaded; the link above still works
 
-  const { size, modules } = state.qr(link);
+  const { size, modules } = qr(link);
   holder.style.setProperty('--qr-size', String(size));
   for (const row of modules) {
     for (const dark of row) {

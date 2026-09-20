@@ -585,3 +585,49 @@ export function findDeletion(
   message: unknown,
   chain: Receipt[] | null | undefined,
 ): Promise<{ deleted: boolean; at: number | null; seq: number | null; reason: string | null }>;
+
+// --- QR ---------------------------------------------------------------------
+
+/** A QR symbol as a grid of modules. `modules[row][col]`, true meaning dark. */
+export interface QRCode {
+  size: number;
+  version: number;
+  ec: 'L' | 'M' | 'Q' | 'H';
+  /** Which of the eight data masks was chosen. */
+  mask: number;
+  modules: boolean[][];
+}
+
+/**
+ * Encode text as a QR symbol, byte mode, smallest version that fits.
+ *
+ * Verified cell for cell against an independent implementation across every
+ * version and error-correction level it supports, and across all eight masks.
+ * No optical scan has been done: the evidence is bit-exact agreement with a
+ * widely deployed encoder, not a phone pointed at one.
+ *
+ * `mask` pins the data mask rather than choosing the best one, which exists so
+ * that a specific arrangement can be compared.
+ */
+export function qr(
+  text: string,
+  options?: { ec?: 'L' | 'M' | 'Q' | 'H'; mask?: number | null },
+): QRCode;
+
+/**
+ * Render a symbol using block-drawing characters, two rows per line.
+ *
+ * Dark modules are drawn filled, which assumes a light background; `invert`
+ * flips the symbol and its quiet zone together for a dark terminal. Nothing in
+ * here can tell which is wanted, so it has to be asked for.
+ */
+export function toText(
+  matrix: QRCode | boolean[][],
+  options?: { quiet?: number; invert?: boolean },
+): string;
+
+/** How much a version at a given level can carry. */
+export function capacity(
+  version: number,
+  ec?: 'L' | 'M' | 'Q' | 'H',
+): { codewords: number; total: number; bytes: number };

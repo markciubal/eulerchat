@@ -489,3 +489,21 @@ test('nonsense is not a group name', async () => {
   assert.match(client.$('notice').textContent, /not a group name/i);
   assert.equal(client.$('cluster-share').hidden, true);
 });
+
+test('the invitation is drawn as a square of elements, not a picture', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  client.$('cluster-new').dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+
+  const holder = client.$('cluster-qr');
+  const cells = holder.querySelectorAll('i');
+  assert.ok(cells.length > 0, 'there is a square to point a camera at');
+
+  // A whole number of rows, and it is elements rather than an image, because
+  // this place does not do pictures.
+  const size = Number(holder.style.getPropertyValue('--qr-size'));
+  assert.ok(size >= 21, `a QR symbol is at least 21 modules across, got ${size}`);
+  assert.equal(cells.length, size * size);
+  assert.equal(holder.querySelectorAll('img, svg, picture').length, 0);
+  assert.ok([...cells].some((c) => c.className === 'qr-on'), 'some of it is dark');
+});
