@@ -13,11 +13,12 @@ import {
 } from '../lib/regions.js';
 import { layout } from '../lib/euler.js';
 import { atlas } from '../lib/atlas.js';
-import { anchorsFor, radialLayout } from '../lib/taxonomy.js';
+import { anchorsFor, radialLayout, resolve } from '../lib/taxonomy.js';
 import { knowledge } from '../lib/knowledge.js';
 
 /** Computed once: where subjects sit before anybody has joined them. */
-const HIERARCHY = radialLayout(knowledge);
+const EXTENT = 1000;
+const HIERARCHY = radialLayout(knowledge, { extent: EXTENT });
 
 const now = () => Date.now();
 const id = () => crypto.randomUUID().slice(0, 8);
@@ -383,6 +384,59 @@ export class World {
         messages: (this.messages.get(zone.key) ?? []).length,
       })),
     };
+  }
+
+  /**
+   * Every occupied subject at its place in the hierarchy — the whole map, not
+   * a neighbourhood of it.
+   *
+   * The atlas can only draw a handful of subjects legibly, so a view is always
+   * a few of them; that leaves someone with no idea what else is out there or
+   * whereabouts in it they are. This is the overview the minimap draws: small
+   * enough to send whole, complete enough that nothing is missing from it.
+   *
+   * Subjects the hierarchy has never heard of still appear. They are given a
+   * deterministic place on an outer ring rather than dropped, so the ring
+   * reads as exactly what it is — everything not yet classified — and the
+   * promise that every subject is somewhere on the map holds.
+   */
+  overview() {
+    const counts = this.census();
+    if (this._overview?.census === counts && this._overview.size === counts.size) {
+      return this._overview.value;
+    }
+
+    const where = this.hierarchy ?? HIERARCHY;
+    const { population } = this.index();
+    // Fanned, so the facets of one subject are distinguishable rather than
+    // stacked invisibly on top of it.
+    const anchors = anchorsFor(population.keys(), where);
+    const placed = [];
+    const strays = [];
+
+    for (const [id, n] of population) {
+      const at = anchors.get(id);
+      if (at) placed.push({ id, n, x: Math.round(at.x), y: Math.round(at.y), known: true });
+      else strays.push({ id, n });
+    }
+
+    // The unclassified ring, ordered by name so it does not reshuffle.
+    strays.sort((a, b) => a.id.localeCompare(b.id));
+    const radius = EXTENT * 0.46;
+    strays.forEach((s, i) => {
+      const angle = ((i + 0.5) / strays.length) * Math.PI * 2;
+      placed.push({
+        id: s.id,
+        n: s.n,
+        x: Math.round(Math.cos(angle) * radius),
+        y: Math.round(Math.sin(angle) * radius),
+        known: false,
+      });
+    });
+
+    const value = { subjects: placed, extent: EXTENT, classified: placed.length - strays.length };
+    this._overview = { census: counts, size: counts.size, value };
+    return value;
   }
 
   /**

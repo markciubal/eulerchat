@@ -154,7 +154,16 @@ export interface AtlasReport {
 
 export interface Atlas {
   subjects: string[];
-  zones: Array<{ key: RegionKey; subjects: string[]; population: number; x: number; y: number }>;
+  zones: Array<{
+    key: RegionKey;
+    subjects: string[];
+    population: number;
+    /** Deepest point of the zone's own ground — where to hang its label. */
+    x: number;
+    y: number;
+    /** Where it grew from, before its neighbours bounded it. */
+    seed: { x: number; y: number };
+  }>;
   curves: Territory[];
   /** User units across the map; coordinates run -extent/2 .. +extent/2. */
   extent: number;
@@ -351,3 +360,17 @@ export class Mold {
 }
 
 export function weave(options: MoldOptions & { generations?: number }): Mold;
+
+// --- short labels ----------------------------------------------------------
+
+/**
+ * The shortest label for each subject that stays unambiguous among the rest:
+ * `music`, `philosophy` and `math` become `mu`, `p`, `ma`. A phrase becomes
+ * its initials. Relative to the set given — adding a subject may lengthen
+ * another's label, because the label's job is to be unmistakable among what is
+ * actually on screen.
+ */
+export function shortLabels(subjects: Iterable<string>): Map<string, string>;
+
+/** `mu + p + ma` — how an overlap is written on the map. */
+export function abbreviate(subjects: string[], labels: Map<string, string>): string;

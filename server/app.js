@@ -100,7 +100,12 @@ export function createEulerChat(options = {}) {
   // Same reasoning as the per-socket handler: an unheard 'error' on either of
   // these is an uncaught exception, and an uncaught exception is every room in
   // the place going down at once.
-  wss.on('error', (err) => console.error('websocket server:', err.message));
+  wss.on('error', (err) => {
+  // A listen failure belongs to whoever owns the port, not to the socket
+  // layer; reporting it here too just prints it twice.
+  if (err.code === 'EADDRINUSE' || err.code === 'EACCES') return;
+  console.error('websocket server:', err.message);
+});
   server.on('clientError', (err, socket) => {
     socket.destroy();
     void err;
@@ -217,7 +222,7 @@ export function createEulerChat(options = {}) {
       bucket.tokens -= cost;
       return true;
     };
-    const PRICE = { createSubject: 10, atlas: 8, post: 2, search: 1, join: 1, leave: 1 };
+    const PRICE = { createSubject: 10, atlas: 8, overview: 6, post: 2, search: 1, join: 1, leave: 1 };
 
     socket.on('message', (raw) => {
       let msg;
@@ -272,6 +277,14 @@ export function createEulerChat(options = {}) {
           case 'leave': {
             world.leave(userId, String(msg.subject));
             pushDiagrams();
+            break;
+          }
+
+          case 'overview': {
+            // Every subject there is, at its place in the hierarchy. Sent once
+            // and cached client-side; it only changes when a subject gains or
+            // loses its first member.
+            send(socket, { type: 'overview', ...world.overview() });
             break;
           }
 

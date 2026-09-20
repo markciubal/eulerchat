@@ -46,6 +46,23 @@ for (const [event, label] of [
   });
 }
 
+/**
+ * A server that cannot take the port has not started, whatever else is true.
+ *
+ * The socket server's error handler exists so one bad connection cannot end
+ * the process — but it also caught `EADDRINUSE` from the listen itself and
+ * merely logged it, leaving a process alive and serving nothing. Failing to
+ * bind is not a connection problem and must not be survivable.
+ */
+chat.server.on('error', (err) => {
+  console.error(
+    err.code === 'EADDRINUSE'
+      ? `eulerchat: port ${PORT} is already in use — stop the other one, or set PORT`
+      : `eulerchat: ${err.message}`,
+  );
+  process.exit(1);
+});
+
 chat.server.listen(PORT, () => {
   const counts = world.census();
   console.log(

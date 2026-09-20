@@ -48,6 +48,7 @@ const STYLES = {
     'stroke-width': 4,
     'stroke-linejoin': 'round',
   },
+  'zone-label': {},
   'atlas-label mine': {
     'font-size': 20,
     'font-weight': 700,
@@ -67,6 +68,23 @@ function applyStyles(svg) {
     if (!rules) continue;
     for (const [prop, value] of Object.entries(rules)) {
       if (!node.hasAttribute(prop)) node.setAttribute(prop, String(value));
+    }
+  }
+  // Overlap labels are styled by a descendant selector, which the attribute
+  // pass above cannot express.
+  for (const text of svg.querySelectorAll('.zone-label text')) {
+    for (const [prop, value] of Object.entries({
+      'font-size': 15,
+      'font-weight': 700,
+      'text-anchor': 'middle',
+      'dominant-baseline': 'middle',
+      fill: INK,
+      'paint-order': 'stroke',
+      stroke: PANEL,
+      'stroke-width': 3.5,
+      'stroke-linejoin': 'round',
+    })) {
+      text.setAttribute(prop, String(value));
     }
   }
 }
@@ -230,4 +248,28 @@ for (const n of [5, 8]) {
 
 function doc(node) {
   return node.ownerDocument;
+}
+
+// --- the minimap ----------------------------------------------------------
+
+{
+  const { renderMinimap } = await import('../public/minimap.js');
+  const wide = populate(new World(), { subjects: 600, users: 2500, chatter: 0 });
+  const me = wide.addUser('me');
+  const picked = [...wide.index().popular].slice(0, 3);
+  for (const s of picked) wide.join(me, s);
+
+  const svg = blank();
+  renderMinimap(svg, wide.overview(), { mine: picked });
+  for (const dot of svg.querySelectorAll('.dot.mine')) {
+    dot.setAttribute('stroke', INK);
+    dot.setAttribute('stroke-width', 6);
+  }
+  for (const frame of svg.querySelectorAll('.here')) {
+    frame.setAttribute('fill', 'none');
+    frame.setAttribute('stroke', '#3a6ea5');
+    frame.setAttribute('stroke-width', 8);
+    frame.setAttribute('stroke-dasharray', '18 12');
+  }
+  rasterise(svg, path.join(OUT, 'minimap.png'), `minimap (${wide.overview().subjects.length} subjects)`);
 }

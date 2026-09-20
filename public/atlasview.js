@@ -1,5 +1,6 @@
 import { key, parse, receives } from '../lib/regions.js';
 import { NS, stroke, cssId } from './diagram.js';
+import { abbreviate, shortLabels } from '../lib/abbrev.js';
 
 /**
  * Rendering for the routed-boundary atlas.
@@ -95,7 +96,30 @@ export function renderAtlas(svg, view) {
     svg.append(label);
   }
 
-  return { territories };
+  // The overlaps, named. They are the most interesting ground on the map and
+  // were the only part of it left unlabelled, because the full names will not
+  // fit in the space where subjects meet. Initials do: `mu + p + ma` for
+  // music, philosophy and math, each shortened only as far as it can be
+  // without becoming ambiguous among what is on screen.
+  const labels = shortLabels(curves.map((c) => c.subject));
+  for (const zone of view.zones ?? []) {
+    if (zone.subjects.length < 2) continue;
+
+    const spot = el('g', { class: 'zone-label', 'data-room': zone.key });
+    const full = `${zone.subjects.join(' ∩ ')} · ${zone.population} here`;
+
+    const title = doc.createElementNS(NS, 'title');
+    title.textContent = full;
+
+    const text = el('text', { x: zone.x, y: zone.y });
+    text.textContent = abbreviate(zone.subjects, labels);
+
+    spot.append(title, text);
+    spot.dataset.full = full;
+    svg.append(spot);
+  }
+
+  return { territories, labels };
 }
 
 /**

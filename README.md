@@ -193,6 +193,7 @@ Importing this does not bind a port or read `process.argv`. The CLI
 | `eulerchat/taxonomy` | `radialLayout`, `anchorsFor` — where subjects sit |
 | `eulerchat/knowledge` | a small default hierarchy |
 | `eulerchat/mold` | `Mold`, `weave` — what grows between them |
+| `eulerchat/abbrev` | `shortLabels`, `abbreviate` — naming the overlaps |
 | `eulerchat/app` | `createEulerChat` |
 | `eulerchat/store` | `World`, `seed` |
 
@@ -476,6 +477,53 @@ good curved channel at zero.
 
 Correlation between channel strength and people bridging a pair, across four
 populations, three never used for tuning: **0.69, 0.97, 0.42, 1.00**.
+
+
+### Everything is on the map, and you are somewhere on it
+
+A view can only draw a handful of subjects legibly, which leaves someone with
+no idea what else exists or whereabouts they are among it. So the view is a
+neighbourhood and the minimap is the whole thing:
+
+```js
+world.overview();   // every occupied subject at its place in the hierarchy
+```
+
+Subjects the hierarchy has never heard of are not dropped — they go on an
+outer ring, which then reads as exactly what it is, everything not yet
+classified. Facets of one subject would otherwise stack invisibly on top of
+it (`modern painting`, `early painting` and `field painting` all resolving to
+`painting`), so each cluster is fanned into a small constellation: on a
+catalogue of 600, 599 distinct positions.
+
+The atlas itself opens framed on the subjects you hold, with exactly 20px of
+margin. Padding in pixels cannot simply be added to a viewBox — the viewBox is
+in user units and the scale between them is the thing being solved for, so
+widening the box to make room shrinks the very margin it widened for.
+`fitTo` solves for the scale first.
+
+### The overlaps are labelled
+
+The overlaps are the most interesting ground on the map and were the only part
+left unnamed, because the full names do not fit where subjects meet. Initials
+do — each shortened only as far as it can be without becoming ambiguous among
+what is on screen:
+
+| on screen | labels |
+|---|---|
+| music, philosophy, math | `mu`, `p`, `ma` — `p` is unique alone, `m` is not |
+| + mathematics | `mu`, `p`, `math`, `mathe` |
+| amateur running, amateur go | `ar`, `ag` — a phrase gives its initials |
+
+So an overlap reads `mu + p + ma`, and hovering gives the full names and how
+many people are there. Labels sit at the deepest point of the zone's own
+ground rather than at the seed it grew from, which after growth can be
+somewhere else entirely.
+
+```js
+import { shortLabels, abbreviate } from 'eulerchat';
+abbreviate(['music', 'philosophy', 'math'], shortLabels(subjects));  // 'mu + p + ma'
+```
 
 
 ## Two views, two bargains

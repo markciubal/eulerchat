@@ -1,5 +1,6 @@
 import { renderDiagram, regionAt, scopeOf, stroke, regionFill } from './diagram.js';
 import { renderAtlas, zoneAt, paintAtlas } from './atlasview.js';
+import { fitTo, pointsOf, renderMinimap } from './minimap.js';
 
 const $ = (id) => document.getElementById(id);
 const svg = $('diagram');
@@ -18,6 +19,8 @@ const state = {
   atlas: null,
   territories: new Map(),
   atlasSize: 5,
+  overview: null,
+  FIT_PADDING: 20,
 };
 
 // --- socket ---------------------------------------------------------------
@@ -95,6 +98,8 @@ function handleFrame(evt) {
       if (state.view === 'map') draw();
       renderRail();
       renderRoom();
+      if (!state.overview) send({ type: 'overview' });
+      else drawMinimap();
       break;
 
     case 'history':
@@ -112,6 +117,13 @@ function handleFrame(evt) {
     case 'atlas':
       state.atlas = msg;
       if (state.view === 'atlas') drawAtlas();
+      break;
+
+    case 'overview':
+      // The whole catalogue, at its place in the hierarchy. Cached: it only
+      // changes when a subject gains or loses its very first member.
+      state.overview = msg;
+      drawMinimap();
       break;
 
     case 'unread':
@@ -286,8 +298,27 @@ function drawAtlas() {
   }
 
   ({ territories: state.territories } = renderAtlas(svg, view));
+
+  // The native tooltip says it too, but only after a pause; this says it at
+  // once, which is what makes the shortened labels feel readable rather than
+  // cryptic.
+  for (const spot of svg.querySelectorAll('.zone-label')) {
+    spot.addEventListener('mouseenter', () => {
+      $('fit').textContent = spot.dataset.full;
+    });
+    spot.addEventListener('mouseleave', () => drawAtlas());
+  }
+
+  // Framed on their own interests rather than on the whole drawing, so opening
+  // the atlas puts them where they already are instead of somewhere to be
+  // found. Everything else is still there to pan to; this only decides where
+  // the view starts.
+  const own = pointsOf(view.curves, view.subscription ?? []);
+  fitTo(svg, own.length ? own : pointsOf(view.curves), state.FIT_PADDING);
+
   paintAtlas(state.territories, state.selected);
   renderRooms();
+  drawMinimap();
 
   const { report, subjects, zones } = view;
   const split = report.disconnected.length;
@@ -297,6 +328,27 @@ function drawAtlas() {
     : `${subjects.length} subjects · ${zones.length} rooms, every one drawn to scale and in one piece`;
   $('fit').classList.toggle('flag', !report.wellFormed);
   $('hidden').hidden = true;
+}
+
+/**
+ * The minimap: everything that exists, and a frame round the part of it these
+ * interests occupy.
+ */
+function drawMinimap() {
+  const wrap = $('minimap-wrap');
+  const mine = state.diagram?.subscription ?? [];
+  if (!state.overview) {
+    wrap.hidden = true;
+    return;
+  }
+
+  wrap.hidden = false;
+  const frame = renderMinimap($('minimap'), state.overview, { mine });
+  const total = state.overview.subjects.length;
+  $('minimap-note').textContent = mine.length
+    ? `${total.toLocaleString()} subjects · yours framed`
+    : `${total.toLocaleString()} subjects · join one to find your place`;
+  void frame;
 }
 
 function showView(which) {

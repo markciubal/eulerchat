@@ -54,6 +54,10 @@
     "./mold": {
       "types": "./lib/index.d.ts",
       "default": "./lib/mold.js"
+    },
+    "./abbrev": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/abbrev.js"
     }
   },
   "bin": {

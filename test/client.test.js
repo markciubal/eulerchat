@@ -108,6 +108,15 @@ test('the client loads against the real page without throwing', async () => {
         },
       },
       { type: 'missed', notifications: [] },
+      {
+        type: 'overview',
+        extent: 1000,
+        classified: 2,
+        subjects: [
+          { id: 'art', n: 4, x: 100, y: 0, known: true },
+          { id: 'philosophy', n: 3, x: -80, y: 40, known: true },
+        ],
+      },
       { type: 'error', message: 'something went wrong' },
     ];
 
@@ -121,6 +130,11 @@ test('the client loads against the real page without throwing', async () => {
     // The unread badge should have made it onto the room chip.
     const chips = document.querySelectorAll('.room-chip');
     assert.ok(chips.length > 0, 'rooms should be listed after a diagram');
+
+    // And the client should have asked for the whole map, then drawn it.
+    const asked = socket.sent.map((p) => JSON.parse(p).type);
+    assert.ok(asked.includes('overview'), 'the client should request the overview');
+    assert.ok(document.querySelectorAll('#minimap circle').length >= 2, 'minimap should be drawn');
   } finally {
     for (const key of ['document', 'window', 'WebSocket', 'location', 'sessionStorage', 'Notification', 'DOMPoint']) {
       delete globalThis[key];

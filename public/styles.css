@@ -512,3 +512,67 @@ input:disabled {
   border-color: var(--accent);
   color: var(--accent);
 }
+
+/* --- minimap --- */
+
+.minimap {
+  margin: 8px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#minimap {
+  width: 116px;
+  height: 116px;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  cursor: pointer;
+}
+
+#minimap .dot {
+  stroke: none;
+}
+
+#minimap .dot.mine {
+  stroke: var(--ink);
+  stroke-width: 3;
+}
+
+#minimap .here {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 6;
+  stroke-dasharray: 14 10;
+}
+
+.minimap figcaption {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* --- overlap labels --- */
+
+.zone-label text {
+  font-size: 15px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  fill: var(--ink);
+  paint-order: stroke;
+  stroke: var(--panel);
+  stroke-width: 3.5px;
+  stroke-linejoin: round;
+  letter-spacing: 0.02em;
+  cursor: help;
+}
+
+.zone-label:hover text {
+  fill: var(--accent);
+  font-size: 17px;
+}
