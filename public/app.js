@@ -255,7 +255,15 @@ function handleFrame(evt) {
     case 'message': {
       const log = (state.history[msg.message.room] ??= []);
       log.push(msg.message);
-      if (msg.message.room === state.selected) renderRoom();
+      if (msg.message.room === state.selected) {
+        renderRoom();
+        // Just this one, rather than the whole room. The log is rebuilt from
+        // scratch on every render, so announcing the list itself re-read every
+        // message each time anybody voted on anything.
+        $('said').textContent = msg.message.sealed
+          ? `${msg.message.author} sent a locked message`
+          : `${msg.message.author} said: ${msg.message.body}`;
+      }
 
       // A sealed message arrives unreadable and is opened here, never on the
       // server, which has no key to open it with.
@@ -370,11 +378,25 @@ document.addEventListener('click', (evt) => {
 
 connect();
 
+/**
+ * What just happened, said once.
+ *
+ * The timer is held rather than let loose. Each call used to schedule its own
+ * four-second hide and forget about it, so a notice posted three and a half
+ * seconds after the previous one was cleared half a second later by the
+ * previous one's timer — and the message most likely to arrive late is the
+ * one saying a message could not be locked and was not sent.
+ *
+ * Emptied rather than hidden: this is a live region, and a live region has to
+ * be in the tree before its text changes for the change to be announced at
+ * all. Longer messages are left up longer, because they take longer to read.
+ */
+let noticeTimer;
 function notify(text) {
   const node = $('notice');
+  clearTimeout(noticeTimer);
   node.textContent = text;
-  node.hidden = !text;
-  if (text) setTimeout(() => (node.hidden = true), 4000);
+  if (text) noticeTimer = setTimeout(() => (node.textContent = ''), Math.max(4000, text.length * 80));
 }
 
 // --- the map ---------------------------------------------------------------
@@ -459,6 +481,17 @@ function renderRooms() {
       button.append(badge);
       button.classList.add('unread');
     }
+
+    // Read out, the chip was its subjects and then two bare numbers with
+    // nothing saying which was which — and whether you are in the room was
+    // carried by text colour alone, which in dark mode is no cue at all.
+    button.setAttribute('aria-pressed', String(room.key === state.selected));
+    button.setAttribute(
+      'aria-label',
+      `${room.subjects.join(' and ')}, ${room.population} ${room.population === 1 ? 'person' : 'people'}` +
+        `${room.member ? ', you are in this one' : ''}${waiting ? `, ${waiting} unread` : ''}`,
+    );
+
     button.addEventListener('click', () => {
       select(room.key);
     });
@@ -485,11 +518,17 @@ function drawAtlas() {
   // The native tooltip says it too, but only after a pause; this says it at
   // once, which is what makes the shortened labels feel readable rather than
   // cryptic.
+  // Put back by hand on the way out, rather than by redrawing. Redrawing
+  // recomputed the fit and threw away whatever the person had panned and
+  // zoomed to, so brushing past a label reset the map under their cursor.
+  const standing = $('fit').textContent;
   for (const spot of svg.querySelectorAll('.zone-label')) {
     spot.addEventListener('mouseenter', () => {
       $('fit').textContent = spot.dataset.full;
     });
-    spot.addEventListener('mouseleave', () => drawAtlas());
+    spot.addEventListener('mouseleave', () => {
+      $('fit').textContent = standing;
+    });
   }
 
   // Framed on their own interests rather than on the whole drawing, so opening
@@ -513,7 +552,6 @@ function drawAtlas() {
       `${split} subject${split === 1 ? '' : 's'} split across patches`
     : `${subjects.length} subjects · ${zones.length} rooms, every one drawn to scale and in one piece`;
   $('fit').classList.toggle('flag', !report.wellFormed);
-  $('hidden').hidden = true;
 }
 
 /**
@@ -747,6 +785,10 @@ function renderRoom() {
   } else {
     if (state.replyTo && state.replyTo.room !== room.key) state.replyTo = null;
     replying.hidden = true;
+    // Emptied as well as hidden. `hidden` alone left the words and the button
+    // that cancels the reply behind for anything reading the page rather than
+    // looking at it.
+    replying.textContent = '';
   }
 
   const messages = state.history[room.key] ?? [];
@@ -1269,6 +1311,9 @@ function subjectRow(subject, population, held) {
   const toggle = document.createElement('button');
   toggle.type = 'button';
   toggle.textContent = held ? 'leave' : 'join';
+  // The rail is a column of buttons all called `join`, which is what somebody
+  // listening to it hears unless each one says what it joins.
+  toggle.setAttribute('aria-label', held ? `leave ${subject}` : `join ${subject}`);
   toggle.addEventListener('click', () =>
     held ? send({ type: 'leave', subject }) : joinSubject(subject),
   );
@@ -1408,7 +1453,10 @@ $('name').addEventListener('change', (evt) => {
 function paintBell() {
   const bell = $('bell');
   if (typeof Notification === 'undefined') {
-    bell.hidden = true;
+    // The whole group, not just the button — the help button that explains it
+    // lives in the wrapper and would otherwise be left standing on its own,
+    // offering to explain a control that is not there.
+    (bell.closest('.bell-wrap') ?? bell).hidden = true;
     return;
   }
   const on = Notification.permission === 'granted';

@@ -6,6 +6,18 @@
   --line: #e4e0d9;
   --accent: #3a6ea5;
   --warn: #9a5b18;
+  /* A surface floating above a panel: the help card, the note you must read
+     before you type, the report dialog. Two rules already asked for this
+     token and it had never been declared, so both fell through to a
+     hard-coded near-white — in dark mode a bright card with 1.19:1 text on
+     it, which is to say unreadable, on the two surfaces the code itself
+     calls the ones that must be read. */
+  --raised: #f4f1ec;
+  /* The edge of a control, as opposed to `--line`, which divides things.
+     A field is `--bg` on a `--panel`, and those differ by 1.04:1, so the
+     border is the only thing saying where the control is — and at `--line`
+     that border measured 1.26:1 against its own surroundings. */
+  --edge: #979084;
   --radius: 10px;
   color-scheme: light;
 }
@@ -19,12 +31,36 @@
     --line: #32343a;
     --accent: #7aa7d9;
     --warn: #d8a15e;
+    --raised: #26282c;
+    --edge: #666a72;
     color-scheme: dark;
+  }
+
+  /* See `.territory`: multiply against a dark panel can only go darker, so
+     every fill vanished and the overlap rooms — the whole product — carried
+     no colour at all. */
+  :root:not([data-theme='light']) .territory {
+    mix-blend-mode: screen;
   }
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Said to anything reading the page aloud, and to nothing looking at it.
+   `display: none` would take it out of the accessibility tree along with
+   everything else, so it is clipped instead. */
+.offscreen {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 body {
@@ -33,10 +69,24 @@ body {
   color: var(--ink);
   font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   display: grid;
-  grid-template-columns: 1fr 360px;
-  grid-template-rows: auto 1fr;
+  /* The rail gives ground back as the window narrows. Fixed at 360px it took
+     a quarter of a 1440 and over a third of a 1024, so the picture — the one
+     thing here whose usefulness is a function of its area — paid for every
+     pixel the window lost. */
+  grid-template-columns: 1fr clamp(280px, 24vw, 360px);
+  grid-template-rows: auto minmax(0, 1fr);
   grid-template-areas: 'bar bar' 'main rail';
-  min-height: 100vh;
+  /* A definite height, and this is load-bearing rather than tidiness.
+     `min-height` leaves the grid auto-height, and in an auto-height grid a
+     `1fr` row resolves to max-content — so it never constrained anything, no
+     descendant ever had a height to scroll within, and every `overflow-y:
+     auto` and `min-height: 0` below was inert. Measured at 1280 with thirty
+     messages in a room: the page grew to 4784px, the log did not scroll, the
+     diagram stretched to 412x4329, and the composer sat 3984px below the
+     fold. Reading made the picture taller and the box you type in further
+     away. */
+  height: 100dvh;
+  overflow: hidden;
 }
 
 /* --- header --- */
@@ -44,24 +94,44 @@ body {
 .bar {
   grid-area: bar;
   display: flex;
-  align-items: baseline;
-  gap: 14px;
-  padding: 12px 20px;
+  /* Wrap to a second row rather than crush. Baseline alignment ranged the
+     tops of eight controls across seven pixels. */
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
 }
 
 .bar h1 {
-  margin: 0;
+  /* The auto margin is what the tagline used to do: hold the two groups to
+     the right without being a paragraph of text that has to fit. */
+  margin: 0 auto 0 0;
   font-size: 17px;
   letter-spacing: 0.02em;
 }
 
-.tagline {
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-  flex: 1;
+.bar-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.bar-group + .bar-group {
+  padding-left: 16px;
+  border-left: 1px solid var(--line);
+}
+
+.bell-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Same trap as `.key-wrap`: a display of its own outranks the attribute. */
+.bell-wrap[hidden] {
+  display: none;
 }
 
 .who {
@@ -74,9 +144,16 @@ body {
 main {
   grid-area: main;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  /* The map leads. Text reflows and a picture does not: the fit scale is what
+     decides whether a territory is labelled `prehistoric archaeology` or
+     `pa`, so width buys legibility here in a way it does not buy it in a
+     column of short messages. */
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  /* Without this the implicit row is auto, which is the same content-sizing
+     trap as the one on `body` above. */
+  grid-template-rows: minmax(0, 1fr);
   gap: 16px;
-  padding: 16px 16px 16px 20px;
+  padding: 16px;
   min-height: 0;
 }
 
@@ -98,9 +175,22 @@ main {
 
 .views {
   display: flex;
+  /* The optional controls drop to a second line before the panel's own name
+     does. Without this the title shrank below its content and came out as
+     "the" over "map", which reads as something broken rather than as a
+     narrow window. */
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 0 2px 8px;
+}
+
+.tab {
+  flex: none;
+}
+
+.view-name {
+  white-space: nowrap;
 }
 
 .view {
@@ -108,12 +198,6 @@ main {
   font-size: 12px;
   border-radius: 999px;
   color: var(--muted);
-}
-
-.view.on {
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: 600;
 }
 
 .atlas-size {
@@ -136,6 +220,16 @@ main {
   stroke-width: 2.5;
   stroke-linejoin: round;
   transition: fill-opacity 120ms ease;
+  /* Plain alpha averages colours, so two opposite hues overlap into grey and
+     the room where two subjects meet reads as switched off. Multiplying
+     darkens instead, which is how overlap ought to read.
+
+     It lives here rather than in an inline style on the element, because an
+     inline style is exactly what a stylesheet cannot override — and on a dark
+     panel multiply is guaranteed to produce something darker than the ground
+     it sits on, so at this opacity every territory disappeared. Dark mode
+     screens instead, which is the same idea pointing the other way. */
+  mix-blend-mode: multiply;
 }
 
 .territory.mine {
@@ -163,16 +257,19 @@ main {
   font-weight: 700;
 }
 
-#diagram.atlas-mode {
-  cursor: pointer;
-}
-
+/* The map is the only mode there is now, so what was `.atlas-mode` — a class
+   nothing has ever applied — belongs here. It is dragged and wheeled, so it
+   says so under the hand, and it keeps the browser's own pan and zoom off it. */
 #diagram {
   flex: 1;
   width: 100%;
   min-height: 320px;
-  cursor: crosshair;
-  touch-action: manipulation;
+  cursor: grab;
+  touch-action: none;
+}
+
+#diagram:active {
+  cursor: grabbing;
 }
 
 /* --- diagram parts --- */
@@ -212,8 +309,16 @@ main {
   fill: var(--muted);
 }
 
-.fit,
-.hidden-note {
+/* The statistics line and the button that explains it, on one line. The
+   button hangs off this wrapper rather than off `#fit`, whose text is
+   rewritten on every redraw and would take it with it. */
+.fit-row {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.fit {
   margin: 6px 4px 2px;
   font-size: 12px;
   color: var(--muted);
@@ -229,6 +334,13 @@ main {
   margin: 8px 0 2px;
   padding: 6px 0 0;
   border-top: 1px solid var(--line);
+  /* Every room is listed here, however little ground the geometry left it to
+     click — which at ten subjects is ninety-odd chips and, uncapped, over two
+     thousand pixels of them pushing the picture off the screen. About two
+     rows; the rest is one flick away. */
+  max-height: 6.5rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .room-chip {
@@ -238,7 +350,7 @@ main {
   padding: 3px 9px 3px 6px;
   font-size: 12px;
   border-radius: 999px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   background: var(--bg);
   color: var(--muted);
 }
@@ -248,9 +360,16 @@ main {
   height: 9px;
 }
 
+/* A room you are in. This was carried by text colour alone — and in dark
+   mode the two colours differ by 2.44:1, which is to say not at all — while
+   the help text tells people to look for "darker text". Weight says it
+   without depending on anyone seeing the difference. */
+.room-chip.mine {
+  font-weight: 600;
+}
+
 .room-chip .count {
   font-variant-numeric: tabular-nums;
-  opacity: 0.75;
 }
 
 .room-chip.mine {
@@ -263,7 +382,10 @@ main {
   font-weight: 600;
 }
 
-.fit .flag {
+/* The class is toggled on `#fit` itself, not on something inside it, so a
+   descendant selector here meant the one place the drawing admits it could
+   not be honest was styled and never once rendered. */
+.fit.flag {
   color: var(--warn);
   font-weight: 600;
 }
@@ -345,7 +467,13 @@ main {
   grid-area: rail;
   border-left: 1px solid var(--line);
   background: var(--panel);
-  padding: 14px 18px;
+  padding: 16px;
+  /* The list of interests takes the slack and scrolls within it, so the group
+     panel below stays put instead of being pushed off the end by a long
+     catalogue. */
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -365,8 +493,11 @@ main {
 
 .subjects {
   list-style: none;
-  margin: 0 0 14px;
+  margin: 0 0 16px;
   padding: 0;
+  flex: 1;
+  min-height: 6rem;
+  overflow-y: auto;
 }
 
 .subjects .group {
@@ -418,17 +549,37 @@ main {
 
 /* --- controls --- */
 
-input[type='text'] {
+/* One rule for everything you type into. The search box in the rail was a
+   `type="search"`, which this did not match, so it wore the browser's own
+   box — a different height, different corners and an inset grey border —
+   next to the button it pairs with. */
+input[type='text'],
+input[type='search'] {
   font: inherit;
   padding: 6px 9px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: 7px;
   background: var(--bg);
   color: var(--ink);
   min-width: 0;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+input[type='search']::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+/* The browser's own placeholder is a grey of its choosing — #757575 in
+   Chrome, in both themes, which is below the readable threshold on either.
+   The `opacity: 1` is for Firefox, which dims it again on top. */
+::placeholder {
+  color: var(--muted);
+  opacity: 1;
 }
 
 input[type='text']:focus-visible,
+input[type='search']:focus-visible,
 button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
@@ -437,7 +588,7 @@ button:focus-visible {
 button {
   font: inherit;
   padding: 6px 13px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: 7px;
   background: var(--bg);
   color: var(--ink);
@@ -449,10 +600,21 @@ button:hover:not(:disabled) {
   color: var(--accent);
 }
 
+/* A control that is waiting is not a control that is broken, and the barred
+   cursor said the second. The composer is disabled until you pick a room,
+   which is the first thing a new arrival meets; at half opacity the
+   placeholder telling them what to do was the least readable text on screen. */
 button:disabled,
 input:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  border-style: dashed;
+  background: transparent;
+  color: var(--muted);
+  cursor: default;
+}
+
+input:disabled::placeholder {
+  color: var(--muted);
+  opacity: 1;
 }
 
 .subjects button {
@@ -464,10 +626,17 @@ input:disabled {
   body {
     grid-template-columns: 1fr;
     grid-template-areas: 'bar' 'main' 'rail';
+    /* Stacked, the three panels genuinely are taller than the window, so the
+       page goes back to scrolling as a page. The escape hatch from the
+       height above, and the reason it is safe to pin the height at all. */
+    height: auto;
+    min-height: 100dvh;
+    overflow: auto;
   }
 
   main {
     grid-template-columns: 1fr;
+    grid-template-rows: auto;
     padding: 16px;
   }
 
@@ -522,6 +691,14 @@ input:disabled {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+/* `hidden` is only a display rule itself, so any other one beats it — and
+   this figure carries a help button, which was therefore on screen and in
+   the tab order before there was a minimap to explain. The same trap the
+   key readout already guards against. */
+.minimap[hidden] {
+  display: none;
 }
 
 #minimap {
@@ -606,14 +783,6 @@ input:disabled {
   min-width: 34px;
 }
 
-#diagram.atlas-mode {
-  cursor: grab;
-  touch-action: none;
-}
-
-#diagram.atlas-mode:active {
-  cursor: grabbing;
-}
 
 /* --- guidance --- */
 
@@ -818,7 +987,7 @@ input:disabled {
   padding: 0 0.25rem;
   font: inherit;
   font-size: 0.75rem;
-  color: var(--muted, #8a8a8a);
+  color: var(--muted);
   cursor: pointer;
   opacity: 0;
   transition: opacity 0.12s;
@@ -829,7 +998,7 @@ li:hover .msg-action,
   opacity: 1;
 }
 .msg-action:hover:not([disabled]) {
-  color: var(--warn, #b4472e);
+  color: var(--warn);
   text-decoration: underline;
 }
 .msg-action[disabled] {
@@ -853,7 +1022,7 @@ li:hover .msg-action,
   padding: 0 0.15rem;
   font: inherit;
   font-size: 0.75rem;
-  color: var(--muted, #8a8a8a);
+  color: var(--muted);
   cursor: pointer;
 }
 .vote:hover {
@@ -866,8 +1035,8 @@ li:hover .msg-action,
 .public-note {
   margin: 0.4rem 0 0.2rem;
   padding: 0.45rem 0.6rem;
-  border-left: 3px solid var(--warn, #b4472e);
-  background: var(--raised, #fbfaf7);
+  border-left: 3px solid var(--warn);
+  background: var(--raised);
   font-size: 0.8rem;
   line-height: 1.4;
 }
@@ -877,7 +1046,7 @@ li:hover .msg-action,
 .cluster-box {
   margin-bottom: 1rem;
   padding-bottom: 0.8rem;
-  border-bottom: 1px solid var(--line, #d8d4cc);
+  border-bottom: 1px solid var(--line);
 }
 .cluster-box h3 {
   margin: 0 0 0.3rem;
@@ -886,7 +1055,7 @@ li:hover .msg-action,
 .cluster-now {
   margin: 0 0 0.4rem;
   font-size: 0.78rem;
-  color: var(--muted, #8a8a8a);
+  color: var(--muted);
 }
 .cluster-actions {
   display: flex;
@@ -896,7 +1065,7 @@ li:hover .msg-action,
 .cluster-join {
   display: block;
   font-size: 0.75rem;
-  color: var(--muted, #8a8a8a);
+  color: var(--muted);
 }
 .cluster-join input {
   width: 100%;
@@ -916,7 +1085,7 @@ li:hover .msg-action,
   margin: 0.5rem 0;
   padding: 0.5rem;
   background: #fff;
-  border: 1px solid var(--line, #d8d4cc);
+  border: 1px solid var(--line);
 }
 .cluster-qr i {
   aspect-ratio: 1;
@@ -935,9 +1104,9 @@ li:hover .msg-action,
   gap: 0.15rem;
   margin: 0.35rem 0 0.5rem;
   padding: 0.5rem 0.6rem;
-  border: 1px solid var(--line, #d8d4cc);
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: var(--raised, #fbfaf7);
+  background: var(--raised);
   max-width: 22rem;
 }
 .why strong {
@@ -951,7 +1120,7 @@ li:hover .msg-action,
   margin: 0 0 0.35rem;
   font-size: 0.76rem;
   line-height: 1.35;
-  color: var(--warn, #b4472e);
+  color: var(--warn);
 }
 .why-choice {
   border: 0;
@@ -974,7 +1143,7 @@ li:hover .msg-action,
   padding: 0.2rem 0;
   font: inherit;
   font-size: 0.75rem;
-  color: var(--muted, #8a8a8a);
+  color: var(--muted);
   cursor: pointer;
 }
 
@@ -986,9 +1155,9 @@ li:hover .msg-action,
 .quoted {
   margin: 0.1rem 0 0.15rem 0.6rem;
   padding-left: 0.5rem;
-  border-left: 2px solid var(--line, #d8d4cc);
+  border-left: 2px solid var(--line);
   font-size: 0.76rem;
-  color: var(--muted, #8a8a8a);
+  color: var(--muted);
 }
 .replying {
   display: flex;
@@ -996,14 +1165,20 @@ li:hover .msg-action,
   gap: 0.5rem;
   margin: 0.3rem 0 0;
   font-size: 0.76rem;
-  color: var(--muted, #8a8a8a);
+  color: var(--muted);
+}
+
+/* See `.minimap[hidden]`: without this, cancelling a reply left the words
+   and the button that cancels it on screen and reachable. */
+.replying[hidden] {
+  display: none;
 }
 .stop-replying {
   border: 0;
   background: none;
   padding: 0;
   font: inherit;
-  color: var(--warn, #b4472e);
+  color: var(--warn);
   cursor: pointer;
   text-decoration: underline;
 }

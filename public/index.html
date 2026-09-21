@@ -7,29 +7,49 @@
     <link rel="stylesheet" href="public/styles.css" />
   </head>
   <body>
+    <!-- Grouped by what each control is for — what this place does with what
+         you say, then who you are here — rather than by the order things were
+         added. The tagline that used to sit second is gone: it said the same
+         thing as the lede below the map, which says it better because it names
+         the rail and gets out of the way once you have joined something. It
+         was also the header's only slack, so at 1366 it wrapped and the bar
+         grew by a fifth. -->
     <header class="bar">
       <h1>eulerchat</h1>
-      <p class="tagline">pick what you are interested in — where your interests overlap, so do the conversations</p>
-      <span class="bell-wrap" data-help="alerts"></span>
-      <button id="bell" type="button" class="bell" title="desktop alerts for mentions and small rooms">
-        alerts off
-      </button>
-      <label class="privacy" data-help="privacy">
-        <input type="checkbox" id="sealed" /> encrypt
-      </label>
-      <label class="privacy" data-help="recording">
-        <input type="checkbox" id="recording" /> keep my own copy
-      </label>
-      <label class="who">
-        you are
-        <input id="name" type="text" autocomplete="off" spellcheck="false" />
-      </label>
-      <span id="key-wrap" class="key-wrap" data-help="key" hidden>
-        <output id="key-mark" class="key"></output>
-        <button id="new-key" type="button" class="new-key" title="stop being recognisable as the person you have been here">
-          new key
-        </button>
-      </span>
+
+      <div class="bar-group">
+        <!-- `for` and `aria-label` are both deliberate. The help button is
+             added inside whatever carries `data-help`, and a label names its
+             first labelable descendant — so without `for` the button became
+             the control, and without `aria-label` the checkbox took the
+             button's text into its own name. -->
+        <label class="privacy" for="sealed" data-help="privacy">
+          <input type="checkbox" id="sealed" aria-label="encrypt" /> encrypt
+        </label>
+        <label class="privacy" for="recording" data-help="recording">
+          <input type="checkbox" id="recording" aria-label="keep my own copy" /> keep my own copy
+        </label>
+        <!-- The button lives inside its help anchor so the explanation follows
+             the control, as it does everywhere else. -->
+        <span class="bell-wrap" data-help="alerts">
+          <button id="bell" type="button" class="bell" title="desktop alerts for mentions and small rooms">
+            alerts off
+          </button>
+        </span>
+      </div>
+
+      <div class="bar-group">
+        <label class="who">
+          you are
+          <input id="name" type="text" autocomplete="off" spellcheck="false" />
+        </label>
+        <span id="key-wrap" class="key-wrap" data-help="key" hidden>
+          <output id="key-mark" class="key"></output>
+          <button id="new-key" type="button" class="new-key" title="stop being recognisable as the person you have been here">
+            new key
+          </button>
+        </span>
+      </div>
     </header>
 
     <main>
@@ -37,24 +57,35 @@
         <div class="views">
           <span class="tab" data-help="atlas"><strong class="view-name">the map</strong></span>
           <button id="refit" type="button" class="view" title="show my interests again">back to my interests</button>
-          <output id="zoom-note" class="zoom-note"></output>
-          <label id="atlas-size" class="atlas-size">
+          <!-- Not an `output`: that is a live region, and this is rewritten on
+               every frame of a drag, which read the zoom level aloud
+               continuously to anyone listening. -->
+          <span id="zoom-note" class="zoom-note" aria-hidden="true"></span>
+          <label id="atlas-size" class="atlas-size" for="subject-count">
             <span data-help="subjects">subjects</span>
-            <input type="range" id="subject-count" min="3" max="10" value="5" />
+            <input type="range" id="subject-count" min="3" max="10" value="5"
+                   aria-label="how many subjects to show" />
             <output id="subject-count-out">5</output>
           </label>
         </div>
         <p id="lede" class="lede">Pick what you are interested in, on the right. Where your interests
           overlap with other people’s, there is a conversation — click inside a circle to read it.</p>
-        <svg id="diagram" role="img" aria-describedby="fit"></svg>
-        <p id="fit" class="fit"></p>
-        <p id="fit-note" class="fit-note" data-help="fit"></p>
-        <p id="hidden" class="hidden-note" hidden></p>
-        <p class="rooms-head" data-help="rooms">conversations here</p>
-        <ul id="rooms" class="rooms" aria-label="rooms in view"></ul>
+        <!-- The picture is pointed at, which is no use without a pointer. The
+             chip list below is the keyboard way in and reaches every room
+             whatever the geometry did, so the name says so rather than
+             leaving the equivalence to be discovered. -->
+        <svg id="diagram" role="img" aria-describedby="fit"
+             aria-label="A map of the subjects in view. Where subjects overlap there is a conversation. Every conversation on this map is also listed as a button under &quot;conversations here&quot; below."></svg>
+        <div class="fit-row" data-help="fit"><p id="fit" class="fit"></p></div>
+        <h3 id="rooms-head" class="rooms-head" data-help="rooms">conversations here</h3>
+        <ul id="rooms" class="rooms" aria-labelledby="rooms-head"></ul>
         <figure id="minimap-wrap" class="minimap" hidden>
           <svg id="minimap" role="img" aria-label="every subject, and where yours are"></svg>
-          <figcaption id="minimap-note" data-help="minimap"></figcaption>
+          <!-- The caption's text is rewritten on every overview frame, and the
+               help button lives inside whatever it is attached to — so
+               attaching it here meant it was deleted a second after load. The
+               span is what gets rewritten; the button hangs off the parent. -->
+          <figcaption data-help="minimap"><span id="minimap-note"></span></figcaption>
         </figure>
       </section>
 
@@ -64,7 +95,12 @@
           <p id="room-meta" class="meta"></p>
         </div>
 
-        <ol id="log" class="log" aria-live="polite"></ol>
+        <!-- The log is rebuilt from scratch on every render — a vote by a
+             stranger, a room switch, an unseal — so announcing the list meant
+             re-reading the whole conversation each time. What arrives is
+             announced once, below. -->
+        <ol id="log" class="log"></ol>
+        <p id="said" class="offscreen" aria-live="polite" aria-atomic="true"></p>
 
         <p class="public-note" data-help="open">
           <strong>Everyone can read this.</strong>
@@ -84,34 +120,21 @@
           />
           <button id="send" type="submit" disabled>post</button>
         </form>
-        <p id="notice" class="notice" hidden></p>
-        <p id="composer-help" class="composer-help" data-help="composer"></p>
+        <!-- A live region has to be in the tree before its text changes, so
+             this is emptied rather than hidden. It carries the only report
+             anybody gets that a message could not be locked and was not sent. -->
+        <p id="notice" class="notice" role="status"></p>
+        <!-- Same as the minimap caption: this is cleared on every room render,
+             which took the help button with it the moment you entered a room. -->
+        <p class="composer-help" data-help="composer"><span id="composer-help"></span></p>
       </section>
     </main>
 
     <aside class="rail">
-      <section class="cluster-box" data-help="cluster">
-        <h3>A group of your own</h3>
-        <p id="cluster-now" class="cluster-now">You are in the open part of this place.</p>
-        <div class="cluster-actions">
-          <button id="cluster-new" type="button">make a group</button>
-          <button id="cluster-leave" type="button" hidden>leave it</button>
-        </div>
-        <label class="cluster-join">
-          join one
-          <input id="cluster-name" type="text" autocomplete="off" spellcheck="false"
-                 placeholder="kite-fox-9" />
-        </label>
-        <div id="cluster-share" class="cluster-share" hidden>
-          <p class="cluster-link"><a id="cluster-url" href="#"></a></p>
-          <div id="cluster-qr" class="cluster-qr" aria-label="a square that opens the invitation"></div>
-        </div>
-      </section>
-
       <h2 data-help="interests">your interests</h2>
-      <label class="funnel">
+      <label class="funnel" for="funnel">
         <span data-help="funnel">joining also adds</span>
-        <select id="funnel">
+        <select id="funnel" aria-label="joining also adds">
           <option value="0">nothing broader</option>
           <option value="1">the field it is in</option>
           <option value="2">the field and its division</option>
@@ -127,10 +150,33 @@
           maxlength="31"
           aria-label="search interests"
         />
-        <button id="create" type="submit" title="create this interest">+</button>
+        <button id="create" type="submit" aria-label="create this interest">+</button>
       </form>
       <p id="rail-total" class="rail-total"></p>
       <ul id="subjects" class="subjects"></ul>
+
+      <!-- Below the interests, not above them. This is a panel for somebody
+           who already knows what this place is, and with an invitation square
+           open it is 419px tall — which put the one control the whole product
+           asks you to use past the middle of the window. -->
+      <section class="cluster-box" data-help="cluster">
+        <h3>A group of your own</h3>
+        <p id="cluster-now" class="cluster-now">You are in the open part of this place.</p>
+        <div class="cluster-actions">
+          <button id="cluster-new" type="button">make a group</button>
+          <button id="cluster-leave" type="button" hidden>leave it</button>
+        </div>
+        <label class="cluster-join">
+          join one
+          <input id="cluster-name" type="text" autocomplete="off" spellcheck="false"
+                 placeholder="kite-fox-9" />
+        </label>
+        <div id="cluster-share" class="cluster-share" hidden>
+          <p class="cluster-link"><a id="cluster-url" href="#"></a></p>
+          <div id="cluster-qr" class="cluster-qr" role="img"
+               aria-label="a square that opens the invitation"></div>
+        </div>
+      </section>
     </aside>
 
     <script type="module" src="public/app.js"></script>

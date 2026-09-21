@@ -73,10 +73,9 @@ export function renderAtlas(svg, view) {
       fill: stroke(curve.subject),
       stroke: stroke(curve.subject),
       class: `territory${held.has(curve.subject) ? ' mine' : ''}`,
-      // Plain alpha averages colours, so two opposite hues overlap into grey —
-      // the room where two subjects meet ends up looking switched off.
-      // Multiplying darkens instead, which is how overlap ought to read.
-      style: 'mix-blend-mode: multiply',
+      // The blend mode lives in the stylesheet, not here. Set inline it could
+      // not be overridden at all, and dark mode has to reverse it; see
+      // `.territory` in public/styles.css.
       'data-subject': cssId(curve.subject),
     });
     territories.set(curve.subject, patch);
@@ -161,7 +160,13 @@ export function renderAtlas(svg, view) {
 export function relabel(written, scale) {
   for (const label of written) {
     const size = label.size / Math.max(scale, 1e-6);
+    // Both, and the inline style is the one that does anything in a browser:
+    // a presentation attribute has no specificity at all, so the stylesheet's
+    // `.atlas-label` and `.zone-label text` rules beat it and the labels held
+    // whatever size the CSS said however far the map was zoomed. The attribute
+    // stays for rasterisers, which never apply the stylesheet.
     label.text.setAttribute('font-size', size.toFixed(2));
+    label.text.style.fontSize = `${size.toFixed(2)}px`;
 
     const widthOf = (value) => {
       label.text.textContent = value;
