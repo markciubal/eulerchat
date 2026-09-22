@@ -95,7 +95,8 @@ export function populate(world, options = {}) {
   const pick = (pool) => pool[Math.floor(pool.length * random() ** 2.2)];
 
   for (let u = 0; u < users; u++) {
-    const userId = world.addUser(`p${u}`);
+    // Sample people, and marked as such; see `World.addUser`.
+    const userId = world.addUser(`p${u}`, { synthetic: true });
     const home = themes[Math.floor(random() * themes.length)];
     // Never ask for more distinct interests than exist. Wanting six out of a
     // catalogue of three is a loop that cannot finish, and it hung the whole
@@ -144,6 +145,7 @@ function converse(world, count, random) {
     if (!rooms.length) continue;
 
     const room = parse(rooms[Math.floor(random() * rooms.length)]);
-    world.post(userId, room, OPENERS[Math.floor(random() * OPENERS.length)]);
+    // A system message, labelled as one: nobody said this.
+    world.post(userId, room, OPENERS[Math.floor(random() * OPENERS.length)], { machine: true });
   }
 }

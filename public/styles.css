@@ -19,6 +19,15 @@
      that border measured 1.26:1 against its own surroundings. */
   --edge: #979084;
   --radius: 10px;
+  /* The corner of a control, and the corner of something meant to be a pill.
+     Tokens rather than numbers because a scheme can square the corners off,
+     and a fully round button in a square-cornered room is the one thing out
+     of place; see `styleOf` in `lib/scheme.js`. */
+  --radius-small: 7px;
+  --pill: 999px;
+  /* The lettering. A stack of what is already on the machine: nothing here
+     is fetched, under any scheme. */
+  --face: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   color-scheme: light;
 }
 
@@ -36,12 +45,6 @@
     color-scheme: dark;
   }
 
-  /* See `.territory`: multiply against a dark panel can only go darker, so
-     every fill vanished and the overlap rooms — the whole product — carried
-     no colour at all. */
-  :root:not([data-theme='light']) .territory {
-    mix-blend-mode: screen;
-  }
 }
 
 * {
@@ -63,19 +66,33 @@
   border: 0;
 }
 
+/* ---------------------------------------------------------------------------
+   A phone first, and a desktop after.
+
+   Everything down to the `min-width` block near the end describes one column
+   on a small screen. The wide layout is the addition, not the other way
+   round — which is the only way the small screen gets designed rather than
+   apologised for. Measured before this: on a 390-wide phone the page was
+   1914px tall, the header took 156px of it, and the box you type in sat at
+   y=1273, a thousand pixels below the fold.
+
+   Two panels do not fit on a phone, so there they are two places, one at a
+   time, reached from a bar at the bottom. `body[data-view]` says which.
+   --------------------------------------------------------------------------- */
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 15px/1.5 var(--face);
   display: grid;
-  /* The rail gives ground back as the window narrows. Fixed at 360px it took
-     a quarter of a 1440 and over a third of a 1024, so the picture — the one
-     thing here whose usefulness is a function of its area — paid for every
-     pixel the window lost. */
-  grid-template-columns: 1fr clamp(280px, 24vw, 360px);
-  grid-template-rows: auto minmax(0, 1fr);
-  grid-template-areas: 'bar bar' 'main rail';
+  /* `minmax(0, 1fr)`, not `1fr`, which is `minmax(auto, 1fr)` and so never
+     narrower than the widest thing in it. The header's full width was setting
+     the width of the page, so nothing in the header ever had to give way: at
+     360 wide the page was 379, and scrolled sideways. */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas: 'bar' 'panes' 'switch';
   /* A definite height, and this is load-bearing rather than tidiness.
      `min-height` leaves the grid auto-height, and in an auto-height grid a
      `1fr` row resolves to max-content — so it never constrained anything, no
@@ -84,9 +101,29 @@ body {
      messages in a room: the page grew to 4784px, the log did not scroll, the
      diagram stretched to 412x4329, and the composer sat 3984px below the
      fold. Reading made the picture taller and the box you type in further
-     away. */
+     away.
+
+     `dvh` rather than `vh` because a phone's toolbars come and go, and `vh`
+     is the tallest it ever gets — which would put the composer behind the
+     address bar for as long as it is showing. */
   height: 100dvh;
   overflow: hidden;
+}
+
+/* One place at a time. The two panes share a cell and take turns.
+   `main` is the conversation's wrapper rather than a pane of its own, so it
+   is what gets shown and hidden; `.room` inside it is always laid out. The
+   interests are a dialog over whichever is showing, not a pane. */
+main,
+.map {
+  grid-area: panes;
+  display: none;
+  min-height: 0;
+}
+
+body[data-view='talk'] main,
+body[data-view='map'] .map {
+  display: flex;
 }
 
 /* --- header --- */
@@ -94,44 +131,159 @@ body {
 .bar {
   grid-area: bar;
   display: flex;
-  /* Wrap to a second row rather than crush. Baseline alignment ranged the
-     tops of eight controls across seven pixels. */
-  flex-wrap: wrap;
   align-items: center;
-  gap: 4px 16px;
-  padding: 12px 16px;
+  gap: 8px;
+  /* Named, because the group and settings panels hang from the header's
+     bottom edge and have to know how far below their buttons that is. */
+  --bar-pad: 8px;
+  padding: var(--bar-pad) 12px;
+  padding-top: max(var(--bar-pad), env(safe-area-inset-top));
   border-bottom: 1px solid var(--line);
   background: var(--panel);
 }
 
+.bar {
+  /* The group and settings panels hang out of the bottom of the header, over
+     the panes, so the header has to be drawn above them. */
+  position: relative;
+  z-index: 10;
+}
+
+/* On a phone the header is one line with the group, your name, your key and
+   the settings to fit on it, and the wordmark is the one of those that does
+   nothing. It is still there for anything reading the page, and comes back
+   where there is room. */
 .bar h1 {
-  /* The auto margin is what the tagline used to do: hold the two groups to
-     the right without being a paragraph of text that has to fit. */
-  margin: 0 auto 0 0;
-  font-size: 17px;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  font-size: 16px;
   letter-spacing: 0.02em;
+}
+
+/* The interests button comes back with the wordmark. On a phone there is no
+   room for it up here, and the bar along the bottom has one. */
+.bar .interests-open {
+  display: none;
+}
+
+/* The auto margin holds the identity group to the far side without being a
+   paragraph of text that has to fit. Stretched to the header's height, so the
+   panel can be hung from the header's edge rather than from the button. */
+.group-wrap {
+  position: relative;
+  /* Allowed to give way, but only when the header is out of room. At 360
+     wide, in a group, with Settings beside the key, the row was 19px wider
+     than the phone and the whole page scrolled sideways. The name is cut
+     short there instead, and the whole of it is in the panel. */
+  flex: 0 1 auto;
+  min-width: 72px;
+  max-width: 30vw;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  margin-right: auto;
 }
 
 .bar-group {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+  min-width: 0;
 }
 
-.bar-group + .bar-group {
-  padding-left: 16px;
-  border-left: 1px solid var(--line);
-}
-
-.bell-wrap {
-  display: inline-flex;
+/* The name field takes what is left rather than a fixed width it may not
+   have, and gives way first when the group's name needs the room. */
+.who {
+  display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
+  flex: 0 1 min(30vw, 150px);
+  min-width: 56px;
 }
 
-/* Same trap as `.key-wrap`: a display of its own outranks the attribute. */
-.bell-wrap[hidden] {
+.who input {
+  width: 100%;
+}
+
+.who-says {
   display: none;
+}
+
+/* Two words that must not become four lines in a pill. */
+.bell,
+.switch button {
+  white-space: nowrap;
+}
+
+/* A setting in the header said in words — a caption and its value, the way
+   the name beside it is — rather than one more pill. Still a button, so it
+   keeps a button's focus ring; it just loses the border and the fill. */
+.bar-text {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  flex: none;
+  padding: 5px 4px;
+  border: 0;
+  background: none;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.bar-text-says {
+  color: var(--muted);
+}
+
+.bar-text-value {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--edge);
+  text-underline-offset: 3px;
+}
+
+.bar-text:hover:not(:disabled) .bar-text-value,
+.bar-text[aria-expanded='true'] .bar-text-value {
+  color: var(--accent);
+  text-decoration-color: currentColor;
+}
+
+/* The theme label lives in the header where the header can hold it, and in
+   Settings where it cannot. Measured, not guessed: at 360 wide the group, the
+   name, the key and Settings already fill the row, and the label drew itself
+   eighty pixels into the key; from 480 there is room. Only one is ever
+   shown, so nothing is said twice. */
+.bar .theme-open {
+  display: none;
+}
+
+.settings-theme .bar-text {
+  padding-left: 0;
+  font-size: 14px;
+}
+
+@media (min-width: 480px) {
+  .bar .theme-open {
+    display: inline-flex;
+  }
+
+  .settings-theme {
+    display: none;
+  }
+}
+
+/* Held to the far end, and stretched to the header's height like the group,
+   so its panel hangs from the header's edge rather than from the button. */
+.settings-wrap {
+  position: relative;
+  flex: none;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
 }
 
 .who {
@@ -142,19 +294,15 @@ body {
 /* --- layout --- */
 
 main {
-  grid-area: main;
-  display: grid;
-  /* The map leads. Text reflows and a picture does not: the fit scale is what
-     decides whether a territory is labelled `prehistoric archaeology` or
-     `pa`, so width buys legibility here in a way it does not buy it in a
-     column of short messages. */
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
-  /* Without this the implicit row is auto, which is the same content-sizing
-     trap as the one on `body` above. */
-  grid-template-rows: minmax(0, 1fr);
-  gap: 16px;
-  padding: 16px;
-  min-height: 0;
+  flex-direction: column;
+  padding: 8px;
+}
+
+/* `display` is left to the view rules above, so they do not have to win a
+   specificity argument to hide a pane. `.room` is the exception: its wrapper
+   is what takes turns, so it is always laid out. */
+.map {
+  flex-direction: column;
 }
 
 .map,
@@ -163,82 +311,719 @@ main {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   min-height: 0;
+}
+
+.room {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+/* The drawing is the panel. Everything else in here is positioned over it,
+   so nothing it carries can squeeze it, and the panel never scrolls. */
+.map {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+}
+
+#diagram {
+  /* What the subject textures are drawn in; see `.texture`. */
+  color: var(--ink);
+  /* A picture, not a page: its names are not text to select, and a double
+     click, which zooms, would otherwise also paint the word under it blue. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Only in the panel. Moved into the full-size dialog it is an ordinary flex
+   child again; see `.map-stage #diagram`. */
+.map > #diagram {
+  position: absolute;
+  /* `--map-top` is the height of the bar the map wears as a window, and
+     nothing the rest of the time; see `.map-bar`. */
+  inset: var(--map-top, 0px) 0 0 0;
+  width: 100%;
+  height: calc(100% - var(--map-top, 0px));
+  border-radius: inherit;
+}
+
+/* --- what floats on the map ----------------------------------------------- */
+
+/* The strips themselves let the pointer through, so the empty space between
+   two buttons still drags the map. Only what is in them catches it. */
+.map-float,
+.map-foot {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.map-float > *,
+.map-foot > * {
+  pointer-events: auto;
+}
+
+.map-float-left {
+  top: calc(8px + var(--map-top, 0px));
+  left: 8px;
+}
+
+.map-float-right {
+  top: calc(8px + var(--map-top, 0px));
+  right: 8px;
+}
+
+.map-foot {
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+/* Raised off the drawing, since whatever colour is underneath is not known. */
+.map-button,
+.map-foot > * {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.12);
+}
+
+.map-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-color: var(--edge);
+  padding: 5px 11px;
+  font-size: 13px;
+  border-radius: var(--pill);
+  white-space: nowrap;
+}
+
+/* A button that opens something says so with a chevron drawn in borders,
+   since this interface is words and lines only. It turns over when open. */
+.pop-toggle::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  margin: 0 1px 0 1px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+}
+
+.map-button[aria-expanded='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pop-toggle[aria-expanded='true']::after {
+  transform: translateY(1px) rotate(225deg);
+}
+
+.map-count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.map-count:empty {
+  display: none;
+}
+
+/* The pop-outs hang under the buttons that open them and stay inside the
+   panel, scrolling within themselves when there is more than fits. */
+.popout {
+  position: absolute;
+  z-index: 3;
+  top: calc(46px + var(--map-top, 0px));
+  max-height: calc(100% - 54px - var(--map-top, 0px));
+  width: min(22rem, calc(100% - 16px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px 12px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.16);
+}
+
+/* Same trap as `.minimap[hidden]`: a display of its own would beat it. */
+.popout[hidden] {
+  display: none;
+}
+
+.popout-left {
+  left: 8px;
+}
+
+.popout-right {
+  right: 8px;
+  width: min(17rem, calc(100% - 16px));
+}
+
+.popout-head {
+  display: flex;
+  align-items: center;
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.popout-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.popout-row button {
+  padding: 4px 11px;
+  font-size: 12px;
+  border-radius: var(--pill);
+}
+
+.popout-foot {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+/* --- pulling the layout about --------------------------------------------- */
+
+/* Nothing to divide on a phone: the panes take turns rather than share the
+   screen, so the handles only exist at the width where they could do
+   something. */
+.splitter {
+  display: none;
+}
+
+/* --- the map, as a window ------------------------------------------------- */
+
+/* All of this is for a screen with room for a window on it. On a phone the
+   map is a place you go to, so the bar, the edges and the way out are never
+   shown; the rules that show them are at the breakpoint, with the window
+   itself. */
+.map-bar,
+.map-edge,
+.map-popout,
+.dock-hint[hidden] {
+  display: none;
+}
+
+/* What the window is moved by. The height is `--map-top` on the floating
+   panel, which is what pushes the drawing and everything on it down to make
+   room. `touch-action` so that a finger on it drags the window and not the
+   page. */
+.map-bar {
+  position: relative;
+  z-index: 4;
+  flex: none;
+  box-sizing: border-box;
+  height: 34px;
+  align-items: center;
+  gap: 4px;
+  /* Clear of the corners, which are for sizing. */
+  padding: 0 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+/* Reads as the window's title, and is a button only so that it takes focus
+   and the arrow keys. */
+.map-grip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: auto;
+  padding: 2px 8px 2px 2px;
+  border: 0;
+  border-radius: var(--radius-small);
+  background: none;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: inherit;
+  touch-action: none;
+}
+
+.map-grip .icon {
+  color: var(--muted);
+}
+
+.map-bar-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  font-size: 12px;
+  border-radius: var(--pill);
+  white-space: nowrap;
+}
+
+.map-popout {
+  touch-action: none;
+}
+
+/* The strip along the top of the map holds five buttons, and the map can be
+   made narrower than five buttons with words on. The panel is measured rather
+   than the page, since docked, as a window and on a phone are three different
+   widths on the same screen. The words go, the pictures stay, and the buttons
+   keep their names; see the markup.
+
+   What goes first is what the picture says well enough alone: Pop out and
+   Expand. Explore keeps its words longest, since "all interests" is the part
+   of it a compass does not say. Below that the right-hand buttons take a row
+   of their own, and the pop-outs hang under both rows. The widths are the
+   buttons' own, measured, with a 12px gap between the two sides. */
+.map {
+  container: map / inline-size;
+}
+
+@container map (max-width: 627px) {
+  .map-popout .map-button-word {
+    display: none;
+  }
+}
+
+@container map (max-width: 575px) {
+  #map-expand .map-button-word {
+    display: none;
+  }
+}
+
+@container map (max-width: 528px) {
+  .map-float-right {
+    top: calc(46px + var(--map-top, 0px));
+  }
+
+  .popout {
+    top: calc(84px + var(--map-top, 0px));
+    max-height: calc(100% - 92px - var(--map-top, 0px));
+  }
+}
+
+@container map (max-width: 337px) {
+  .map-button-word {
+    display: none;
+  }
+}
+
+/* The edges and corners it is sized by. Inside the panel, which clips, and
+   thin enough to stay clear of the buttons that float on the drawing. */
+.map-edge {
+  position: absolute;
+  z-index: 5;
+  touch-action: none;
+}
+
+.map-edge[data-edge='n'],
+.map-edge[data-edge='s'] {
+  left: 18px;
+  right: 18px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.map-edge[data-edge='e'],
+.map-edge[data-edge='w'] {
+  top: 18px;
+  bottom: 18px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.map-edge[data-edge='n'] { top: 0; }
+.map-edge[data-edge='s'] { bottom: 0; }
+.map-edge[data-edge='e'] { right: 0; }
+.map-edge[data-edge='w'] { left: 0; }
+
+.map-edge[data-edge='ne'],
+.map-edge[data-edge='se'],
+.map-edge[data-edge='sw'],
+.map-edge[data-edge='nw'] {
+  /* Bigger than the edges are thick: the panel's rounded corners clip what is
+     in them, so the very corner of a corner is not there to be pressed. */
+  width: 18px;
+  height: 18px;
+}
+
+.map-edge[data-edge='ne'] { top: 0; right: 0; cursor: nesw-resize; }
+.map-edge[data-edge='sw'] { bottom: 0; left: 0; cursor: nesw-resize; }
+.map-edge[data-edge='se'] { bottom: 0; right: 0; cursor: nwse-resize; }
+.map-edge[data-edge='nw'] { top: 0; left: 0; cursor: nwse-resize; }
+
+/* While the window is being moved or sized nothing under the pointer should
+   light up or be selected, and the hand stays closed wherever it goes. */
+body[data-dragging] {
+  user-select: none;
+}
+
+body[data-dragging] .map-bar {
+  cursor: grabbing;
+}
+
+/* Where the map will land if it is let go of here: the column it would
+   take, in the accent. The pointer goes through it, since it is a picture of
+   an outcome and not a thing on the page. */
+.dock-hint {
+  position: fixed;
+  z-index: 4;
+  bottom: 16px;
+  width: calc(100% - var(--talk, 58%) - 24px);
+  margin-top: 16px;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  pointer-events: none;
+}
+
+.dock-hint[data-side='left'] {
+  left: 16px;
+}
+
+.dock-hint[data-side='right'] {
+  right: 16px;
+}
+
+/* --- the map, larger ------------------------------------------------------ */
+
+.map-modal {
+  /* Nearly the whole window. The point of it is area. */
+  width: min(96vw, 1500px);
+  height: min(92dvh, 1040px);
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--ink);
+  overflow: hidden;
+}
+
+/* A dialog is `display: none` until it is open, so the layout goes on the
+   open state rather than on the element. */
+.map-modal[open] {
   display: flex;
   flex-direction: column;
 }
 
-.map {
+.map-modal::backdrop {
+  background: rgb(0 0 0 / 0.5);
+}
+
+.map-modal-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.map-modal-bar strong {
+  font-size: 13px;
+}
+
+/* Its own Close, and not a help button inside the title. */
+.map-modal-bar > button {
+  margin-left: auto;
+}
+
+.map-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
   padding: 10px;
 }
 
-/* --- view switch --- */
+/* In here the picture takes the whole box, whatever floor it keeps in the
+   panel it came from. */
+.map-stage #diagram {
+  flex: 1;
+  min-height: 0;
+}
 
-.views {
+/* --- getting between them ------------------------------------------------ */
+
+.switch {
+  grid-area: switch;
   display: flex;
-  /* The optional controls drop to a second line before the panel's own name
-     does. Without this the title shrank below its content and came out as
-     "the" over "map", which reads as something broken rather than as a
-     narrow window. */
-  flex-wrap: wrap;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  /* Clear of the home indicator on a phone that has one. */
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.switch button {
+  flex: 1;
+  /* Comfortably past the 24px a finger needs, and past the 44px it prefers:
+     now the icon over the word, as a tab bar is read with a thumb. */
+  min-height: 56px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 0 2px 8px;
-}
-
-.tab {
-  flex: none;
-}
-
-.view-name {
-  white-space: nowrap;
-}
-
-.view {
-  padding: 3px 12px;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--muted);
   font-size: 12px;
-  border-radius: 999px;
+}
+
+/* The unread count sits on the corner of the icon, where a count is looked
+   for, rather than under the word. */
+.switch .tab-badge {
+  position: absolute;
+  top: 5px;
+  left: calc(50% + 7px);
+  margin: 0;
+}
+
+/* The set of icons is drawn nowhere itself; each one is used by name. */
+.icon-set {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+/* Lines in the colour of the words beside them, which is what makes them
+   follow the theme and turn accent with an active tab; and sized to those
+   words, so an icon in a small button is a small icon. */
+.icon {
+  width: 1.2em;
+  height: 1.2em;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Over the word in the tab bar, where there is a thumb's width for it. */
+.switch .icon {
+  width: 22px;
+  height: 22px;
+}
+
+/* A button with an icon puts the two side by side. No specificity at all, so
+   a component that lays out its own buttons — the tab bar stacks them — is
+   never argued with. */
+:where(button:has(> .icon)) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4em;
+}
+
+/* And having a display of its own, it has to be told again that hidden means
+   hidden, as everywhere else here. */
+:where(button:has(> .icon))[hidden] {
+  display: none;
+}
+
+.bar-button .icon {
+  margin-left: -2px;
+}
+
+/* The theme label lines its words up on their baseline; the icon is centred
+   on them instead, since it has no baseline. */
+.bar-text .icon {
+  align-self: center;
+}
+
+.switch button[aria-current='true'] {
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.switch button:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+/* How much is waiting in rooms you are not looking at. */
+.tab-badge {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 0 5px;
+  border-radius: var(--pill);
+  background: var(--accent);
+  color: var(--panel);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.tab-badge[hidden] {
+  display: none;
+}
+
+/* What will happen to the message being written, next to the box it is being
+   written in. */
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 0 12px 6px;
+}
+
+/* --- settings, from the header ------------------------------------------- */
+
+/* Under the button, and right-aligned to it, since the button is at the far
+   end of the header and a panel hung from its left edge would run off the
+   screen. */
+.settings-pop {
+  top: calc(100% + var(--bar-pad) + 6px);
+  right: 0;
+  width: min(19rem, calc(100vw - 24px));
+  max-height: calc(100dvh - 96px);
+  /* The sections carry their own space above and below; see `.settings`. */
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* A line between one section and the next, and none above the first one
+   showing — whichever that turns out to be. Which sections show depends on
+   the width (the theme, the layout) and on what the browser offers (alerts),
+   and a rule that tried to work out which came first got it wrong as soon as
+   one was hidden by the stylesheet rather than by the page: the menu opened
+   with a line along its top separating it from nothing. So every section
+   draws its line a pixel above itself, and the menu, which clips whatever
+   spills out of it, clips the first. */
+.settings {
+  margin-top: -1px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.settings-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-row button {
+  padding: 4px 11px;
+  font-size: 12px;
+  border-radius: var(--pill);
+}
+
+/* Nothing to lay out on a phone, where the panes take turns rather than sit
+   side by side. It comes back at the breakpoint with the divider. */
+.settings-layout {
+  display: none;
+}
+
+/* The result of checking the deletion record. Muted when it is good news,
+   and in the warning colour when it is not, so a problem is not read past. */
+.settings-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
   color: var(--muted);
 }
 
+.settings-note:empty {
+  display: none;
+}
+
+.settings-note.problem {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.settings h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+/* --- the view pop-out --- */
+
 .atlas-size {
-  margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.atlas-size > span {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+/* Relief: labelled as the slider under it is, with its buttons at the end
+   of the row as Reset view's are above it. */
+.relief-row > span {
+  display: inline-flex;
+  align-items: center;
+  margin-right: auto;
   font-size: 12px;
   color: var(--muted);
 }
 
 .atlas-size input {
-  width: 92px;
+  flex: 1;
+  min-width: 0;
+  /* A 16px-tall slider is not something a finger can catch hold of. */
+  height: 26px;
 }
 
 /* --- atlas --- */
 
+/* A room's own ground. The colour says which subjects it is made of and the
+   opacity says how busy it is — see `heat` in public/atlasview.js. No blend
+   mode: the rooms do not overlap each other, so there is nothing to blend,
+   and what used to be an emergent colour where territories crossed is now
+   the room's own. */
+.zone-ground {
+  stroke: none;
+  transition: fill-opacity 200ms ease;
+}
+
+/* The room being read. Opacity is spoken for, so this is a ring. */
+.zone-ground.on {
+  stroke: var(--ink);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  paint-order: stroke;
+}
+
+/* Subjects, drawn over the rooms as outlines only. Full strength, so which
+   subject a patch of ground belongs to stays readable however quiet it is. */
 .territory {
-  fill-opacity: 0.13;
+  fill: none;
   stroke-width: 2.5;
   stroke-linejoin: round;
-  transition: fill-opacity 120ms ease;
-  /* Plain alpha averages colours, so two opposite hues overlap into grey and
-     the room where two subjects meet reads as switched off. Multiplying
-     darkens instead, which is how overlap ought to read.
-
-     It lives here rather than in an inline style on the element, because an
-     inline style is exactly what a stylesheet cannot override — and on a dark
-     panel multiply is guaranteed to produce something darker than the ground
-     it sits on, so at this opacity every territory disappeared. Dark mode
-     screens instead, which is the same idea pointing the other way. */
-  mix-blend-mode: multiply;
 }
 
 .territory.mine {
-  stroke-width: 4;
-  fill-opacity: 0.2;
+  stroke-width: 4.5;
 }
 
 .territory.lit {
-  fill-opacity: 0.4;
+  stroke-width: 5.5;
 }
 
 .atlas-label {
@@ -257,14 +1042,78 @@ main {
   font-weight: 700;
 }
 
+/* A group's outline. It is the group's own conversation, whose ground is
+   every room in the group put together, so it is drawn as the frame round
+   them rather than as one more interest: dashed, and in ink, where every
+   interest's own outline is solid and in its colour. It does not thicken when
+   a room is opened, because every room in the group is inside it and it would
+   never be anything else. */
+.territory.group-frame,
+.territory.group-frame.mine,
+.territory.group-frame.lit {
+  stroke: var(--ink);
+  stroke-width: 3;
+  stroke-dasharray: 14 8;
+  stroke-linecap: round;
+}
+
+/* The group's name, on the top of its outline. It opens the group's own
+   conversation, which is held by everybody in the group and so often has no
+   ground of its own to be clicked on — so unlike every other label it takes
+   the pointer. */
+.atlas-label.group-name {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.atlas-label.group-name:hover {
+  fill: var(--accent);
+}
+
+/* --- the map in relief ---------------------------------------------------- */
+
+/* What a room's top is laid on: solid, so its colour can keep saying how busy
+   it is by how strongly it is laid on, without the walls behind showing
+   through. See `renderRelief` in public/atlasview.js. */
+.relief-base {
+  fill: var(--panel);
+  stroke: none;
+}
+
+/* A room's top shows the inner half of each outline along its edge, since the
+   top is cut to the room's own shape, so the lines are drawn twice as wide to
+   come out as wide as they are flat. */
+.relief-top .territory {
+  stroke-width: 5;
+}
+
+.relief-top .territory.mine {
+  stroke-width: 9;
+}
+
+.relief-top .territory.lit {
+  stroke-width: 11;
+}
+
+.relief-top .zone-ground.on {
+  stroke-width: 4;
+}
+
+/* The walls carry their own colours, worked out from the room's. */
+.wall {
+  stroke: none;
+}
+
 /* The map is the only mode there is now, so what was `.atlas-mode` — a class
    nothing has ever applied — belongs here. It is dragged and wheeled, so it
    says so under the hand, and it keeps the browser's own pan and zoom off it. */
 #diagram {
-  flex: 1;
-  width: 100%;
-  min-height: 320px;
   cursor: grab;
+  /* The map is dragged and pinched, so the browser's own gestures stay off
+     it. Safe because the page itself does not scroll — the pane that needs
+     to scroll does it on its own. */
   touch-action: none;
 }
 
@@ -314,33 +1163,30 @@ main {
    rewritten on every redraw and would take it with it. */
 .fit-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 5px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: var(--radius-small);
 }
 
 .fit {
-  margin: 6px 4px 2px;
+  margin: 0;
   font-size: 12px;
+  line-height: 1.4;
   color: var(--muted);
 }
 
 /* Every room in view, reachable whether or not the geometry left it any
-   ground to click. */
+   ground to click. At ten subjects that is ninety-odd chips, which is why it
+   lives in a pop-out that scrolls rather than under the picture. */
 .rooms {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
   list-style: none;
-  margin: 8px 0 2px;
-  padding: 6px 0 0;
-  border-top: 1px solid var(--line);
-  /* Every room is listed here, however little ground the geometry left it to
-     click — which at ten subjects is ninety-odd chips and, uncapped, over two
-     thousand pixels of them pushing the picture off the screen. About two
-     rows; the rest is one flick away. */
-  max-height: 6.5rem;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  margin: 0;
+  padding: 0;
 }
 
 .room-chip {
@@ -349,7 +1195,7 @@ main {
   gap: 6px;
   padding: 3px 9px 3px 6px;
   font-size: 12px;
-  border-radius: 999px;
+  border-radius: var(--pill);
   border: 1px solid var(--edge);
   background: var(--bg);
   color: var(--muted);
@@ -370,6 +1216,19 @@ main {
 
 .room-chip .count {
   font-variant-numeric: tabular-nums;
+}
+
+/* How many are lurking: quieter than the head count, and dashed, like the
+   lurker's own label, so it is never read as more people in it. */
+.room-chip .lurk-count {
+  padding: 0 6px;
+  border: 1px dashed var(--edge);
+  border-radius: var(--pill);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .room-chip.mine {
@@ -393,8 +1252,56 @@ main {
 /* --- room --- */
 
 .room-head {
+  position: relative;
   padding: 12px 14px 8px;
   border-bottom: 1px solid var(--line);
+}
+
+/* The quick-join code, top right of the conversation it opens, with room kept
+   for it so a long title does not run underneath. */
+.room-share-wrap {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  display: flex;
+  gap: 6px;
+}
+
+.room-head:has(#room-share:not([hidden])) {
+  padding-right: 8.5rem;
+}
+
+/* Poke the server sits beside it, and the title keeps clear of both. */
+.room-head:has(#poke:not([hidden])) {
+  padding-right: 10rem;
+}
+
+.room-head:has(#poke:not([hidden])):has(#room-share:not([hidden])) {
+  padding-right: 18rem;
+}
+
+/* On a narrow screen, only its mark: its name is still its name to anybody
+   listening, and on hover. */
+@media (max-width: 560px) {
+  #poke .label {
+    display: none;
+  }
+
+  .room-head:has(#poke:not([hidden])):has(#room-share:not([hidden])) {
+    padding-right: 11rem;
+  }
+}
+
+/* A display of its own outranks the attribute, as everywhere else here. */
+.bar-button[hidden] {
+  display: none;
+}
+
+.room-share-pop {
+  top: calc(100% + 6px);
+  right: 0;
+  width: min(19rem, calc(100vw - 40px));
+  max-height: min(34rem, calc(100dvh - 140px));
 }
 
 .room-head h2 {
@@ -461,28 +1368,51 @@ main {
   color: var(--warn);
 }
 
-/* --- rail --- */
+/* --- interests --- */
 
-.rail {
-  grid-area: rail;
-  border-left: 1px solid var(--line);
+/* A box in the middle, and the same size whatever is in it. The list inside
+   changes with every letter typed into the search, and a dialog that grew
+   and shrank with it would move the box being typed in. On a phone it is
+   nearly the whole screen, which is what the Interests tab used to be. */
+.interests-modal {
+  width: min(34rem, calc(100vw - 16px));
+  height: min(46rem, calc(100dvh - 16px));
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   background: var(--panel);
-  padding: 16px;
-  /* The list of interests takes the slack and scrolls within it, so the group
-     panel below stays put instead of being pushed off the end by a long
-     catalogue. */
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow-y: auto;
+  color: var(--ink);
+  overflow: hidden;
 }
 
-.rail h2 {
-  margin: 0 0 8px;
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
+/* As with the map: `display: none` until open, so the layout goes on the
+   open state. */
+.interests-modal[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.interests-modal::backdrop {
+  background: rgb(0 0 0 / 0.5);
+}
+
+.modal-title {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* The list of interests takes the slack and scrolls within it, so the search
+   stays put above it. On a screen too short for even that, the whole body
+   scrolls instead. */
+.interests-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
 }
 
 .rail-total {
@@ -493,10 +1423,10 @@ main {
 
 .subjects {
   list-style: none;
-  margin: 0 0 16px;
+  margin: 0;
   padding: 0;
   flex: 1;
-  min-height: 6rem;
+  min-height: 96px;
   overflow-y: auto;
 }
 
@@ -516,17 +1446,72 @@ main {
 
 .subjects li {
   display: flex;
+  /* Wraps so the colour picker can take a line of its own under the row it
+     belongs to, rather than squeezing the name out of the way. */
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: 5px 0;
   border-bottom: 1px solid var(--line);
 }
 
+/* A button rather than a dot, because it is one — see `openColour`. The hit
+   area grows past it so a finger can land on something 11px across. */
 .swatch {
   width: 11px;
   height: 11px;
+  padding: 0;
   border-radius: 50%;
+  border: 1px solid transparent;
   flex: none;
+  position: relative;
+  cursor: pointer;
+}
+
+.swatch::after {
+  content: '';
+  position: absolute;
+  inset: -7px;
+}
+
+.swatch:hover,
+.swatch:focus-visible {
+  border-color: var(--ink);
+}
+
+/* A colour somebody chose rather than one a name gave, said with a ring so
+   that it does not depend on remembering which is which. */
+.swatch.picked {
+  box-shadow: 0 0 0 2px var(--panel), 0 0 0 3px var(--muted);
+}
+
+/* The hue wheel for one subject. It takes a whole row of its own so the
+   slider has somewhere to go on a narrow screen. */
+.picker {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0 2px;
+}
+
+.picker input[type='range'] {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  /* The wheel itself, so the slider says what it does. */
+  background: linear-gradient(
+    to right,
+    hsl(0 85% 50%), hsl(60 85% 50%), hsl(120 85% 50%),
+    hsl(180 85% 50%), hsl(240 85% 50%), hsl(300 85% 50%), hsl(360 85% 50%)
+  );
+  border-radius: var(--pill);
+}
+
+.picker-reset {
+  padding: 2px 8px;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .subjects .name {
@@ -549,7 +1534,7 @@ main {
 
 /* --- controls --- */
 
-/* One rule for everything you type into. The search box in the rail was a
+/* One rule for everything you type into. The search box for interests was a
    `type="search"`, which this did not match, so it wore the browser's own
    box — a different height, different corners and an inset grey border —
    next to the button it pairs with. */
@@ -558,7 +1543,7 @@ input[type='search'] {
   font: inherit;
   padding: 6px 9px;
   border: 1px solid var(--edge);
-  border-radius: 7px;
+  border-radius: var(--radius-small);
   background: var(--bg);
   color: var(--ink);
   min-width: 0;
@@ -589,7 +1574,7 @@ button {
   font: inherit;
   padding: 6px 13px;
   border: 1px solid var(--edge);
-  border-radius: 7px;
+  border-radius: var(--radius-small);
   background: var(--bg);
   color: var(--ink);
   cursor: pointer;
@@ -621,35 +1606,6 @@ input:disabled::placeholder {
   padding: 2px 9px;
   font-size: 12px;
 }
-
-@media (max-width: 900px) {
-  body {
-    grid-template-columns: 1fr;
-    grid-template-areas: 'bar' 'main' 'rail';
-    /* Stacked, the three panels genuinely are taller than the window, so the
-       page goes back to scrolling as a page. The escape hatch from the
-       height above, and the reason it is safe to pin the height at all. */
-    height: auto;
-    min-height: 100dvh;
-    overflow: auto;
-  }
-
-  main {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto;
-    padding: 16px;
-  }
-
-  .rail {
-    border-left: none;
-    border-top: 1px solid var(--line);
-  }
-
-  .room {
-    min-height: 420px;
-  }
-}
-
 /* --- unread --- */
 
 .room-chip.unread {
@@ -661,10 +1617,10 @@ input:disabled::placeholder {
 .room-chip .badge {
   min-width: 16px;
   padding: 0 5px;
-  border-radius: 999px;
+  border-radius: var(--pill);
   background: var(--accent);
   color: var(--panel);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   text-align: center;
@@ -673,7 +1629,7 @@ input:disabled::placeholder {
 .bell {
   padding: 3px 10px;
   font-size: 12px;
-  border-radius: 999px;
+  border-radius: var(--pill);
   color: var(--muted);
 }
 
@@ -685,8 +1641,8 @@ input:disabled::placeholder {
 /* --- minimap --- */
 
 .minimap {
-  margin: 8px 0 0;
-  padding: 8px 0 0;
+  margin: 10px 0 0;
+  padding: 10px 0 0;
   border-top: 1px solid var(--line);
   display: flex;
   align-items: center;
@@ -702,11 +1658,11 @@ input:disabled::placeholder {
 }
 
 #minimap {
-  width: 116px;
-  height: 116px;
+  width: 72px;
+  height: 72px;
   flex: none;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-small);
   background: var(--bg);
   cursor: pointer;
 }
@@ -733,6 +1689,500 @@ input:disabled::placeholder {
   color: var(--muted);
 }
 
+/* The way into every interest, with room round it, so it reads as a thing to
+   do and not as the minimap's caption running on into the note below. */
+.popout-explore {
+  padding: 12px 0 4px;
+}
+
+.popout-explore button {
+  padding: 6px 14px;
+}
+
+/* --- all interests, played small ------------------------------------------- */
+
+/* The card a pointer resting on "Explore all interests" gets; see
+   `public/peek.js`. Over everything but the dialogs and the help card, and
+   never in the way: the pointer goes straight through it. */
+.explore-peek {
+  position: fixed;
+  z-index: 20;
+  width: 232px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 32px rgb(0 0 0 / 0.22);
+  pointer-events: none;
+  animation: peek-in 160ms ease-out;
+}
+
+.explore-peek[hidden] {
+  display: none;
+}
+
+@keyframes peek-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.explore-peek-map {
+  display: block;
+  width: 100%;
+  height: 150px;
+  border-radius: var(--radius-small);
+  background: var(--bg);
+}
+
+/* `--r` is each dot's size at the whole view and `--k` is how much of it is
+   left at this one, written once for all of them as the view moves. Where
+   `r` is not a property the attribute stands, and the dots only grow with
+   the zoom. */
+.peek-dots circle {
+  r: calc(var(--r) * var(--k, 1));
+  fill-opacity: 0.6;
+}
+
+.peek-dots circle.mine {
+  fill-opacity: 1;
+  stroke: var(--ink);
+  stroke-width: 0.6px;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Written in the theme's ink with a halo of the paper, like the explorer's. */
+.peek-names {
+  fill: var(--ink);
+  stroke: var(--bg);
+  stroke-linejoin: round;
+  paint-order: stroke;
+  font-family: var(--face);
+  font-weight: 600;
+  text-anchor: middle;
+  opacity: 0;
+  transition: opacity 240ms ease;
+}
+
+.peek-names.shown {
+  opacity: 1;
+}
+
+.peek-names .picked {
+  fill: var(--accent);
+}
+
+.peek-ring {
+  fill: none;
+  stroke: var(--accent);
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.peek-ring.pulsing {
+  animation: peek-pulse 900ms ease-out 2;
+}
+
+@keyframes peek-pulse {
+  0% {
+    opacity: 1;
+    transform: scale(0.7);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2);
+  }
+}
+
+.peek-cursor {
+  opacity: 0;
+  fill: var(--ink);
+  stroke: var(--bg);
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+
+.peek-cursor.shown {
+  opacity: 1;
+  animation: peek-glide 600ms ease-out;
+}
+
+@keyframes peek-glide {
+  from {
+    opacity: 0;
+    transform: translate(var(--gx), var(--gy));
+  }
+  30% {
+    opacity: 1;
+  }
+}
+
+.explore-peek-say {
+  margin: 6px 2px 1px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+/* Still shown, and still round, only without anything gliding: `peek.js`
+   cuts from stop to stop rather than flying. */
+@media (prefers-reduced-motion: reduce) {
+  .explore-peek,
+  .peek-ring.pulsing,
+  .peek-cursor.shown {
+    animation: none;
+  }
+
+  .peek-ring.pulsing {
+    opacity: 1;
+  }
+
+  .peek-names {
+    transition: none;
+  }
+}
+
+/* --- all interests: the minimap, big enough to go into --- */
+
+/* The sheet and a panel beside it where there is width; on a phone the panel
+   goes underneath and the sheet keeps most of the height. */
+.explorer-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+#explorer-find {
+  flex: 1;
+  min-width: 0;
+  max-width: 22rem;
+}
+
+.explorer-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  background: var(--bg);
+}
+
+#explorer-chart {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  touch-action: none;
+  cursor: grab;
+  /* As on the map: a picture, whose names are not for selecting. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#explorer-chart:active {
+  cursor: grabbing;
+}
+
+.explorer-zoom {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.explorer-zoom button {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: var(--radius-small);
+  background: var(--panel);
+}
+
+.explorer-side {
+  flex: none;
+  max-height: 42%;
+  overflow-y: auto;
+  padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+}
+
+@media (min-width: 720px) {
+  .explorer-body {
+    flex-direction: row;
+  }
+
+  .explorer-side {
+    width: 17rem;
+    max-height: none;
+    border-top: 0;
+    border-left: 1px solid var(--line);
+  }
+}
+
+/* Faint, and nothing to press: a division names a patch, and the dots are
+   what can be picked. The halo is what keeps it readable over them. */
+.chart-division {
+  fill: var(--muted);
+  opacity: 0.9;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+/* Once the fields are named the divisions have said their piece. */
+#explorer-chart.near .chart-division {
+  opacity: 0.3;
+}
+
+/* Fields, and then interests, only once there is room to read them; see
+   `FIELDS_AT` and `NAMES_AT` in `public/explorer.js`. The halo's width is
+   set with the lettering's size, on the group, since both hold still on the
+   screen as the sheet is zoomed under them. */
+.chart-field,
+.chart-name {
+  display: none;
+  text-anchor: middle;
+  fill: var(--ink);
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.chart-field {
+  font-weight: 600;
+  fill: var(--muted);
+  dominant-baseline: middle;
+}
+
+#explorer-chart.near .chart-field,
+#explorer-chart.close .chart-name,
+#explorer-chart .chart-name.picked,
+#explorer-chart.few .chart-name.found {
+  display: inline;
+}
+
+/* Close in, the dots have spread out and the fields have said their piece;
+   the interests are what is being read now. */
+#explorer-chart.close .chart-field {
+  opacity: 0.35;
+}
+
+/* Drawn, but out of the view, and so not painted; see `public/cull.js`. It
+   insists because it has to win over every rule that shows a name or a dot:
+   something off the screen is off it whatever else is true of it. */
+#diagram .culled,
+#explorer-chart .culled {
+  display: none !important;
+}
+
+.chart-dots .dot {
+  cursor: pointer;
+  stroke: var(--bg);
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-dots .dot.empty {
+  opacity: 0.4;
+}
+
+/* In relief a dot is a column: a group of its side and its top, which take
+   the dot's outline from it. Each keeps its line a pixel wide however far the
+   column is scaled with the zoom, which the group cannot do for them. */
+.chart-dots g.dot > * {
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-dots .dot.mine {
+  opacity: 1;
+  stroke: var(--ink);
+  stroke-width: 2.5px;
+}
+
+.chart-name.mine {
+  font-weight: 700;
+}
+
+/* Searching dims everything that does not match, rather than hiding it, so
+   the matches are seen among their neighbours. */
+#explorer-chart.searching .dot:not(.found):not(.picked) {
+  opacity: 0.12;
+}
+
+#explorer-chart.searching .chart-name:not(.found):not(.picked) {
+  opacity: 0.4;
+}
+
+.chart-dots .dot.picked {
+  stroke: var(--accent);
+  stroke-width: 3.5px;
+}
+
+.chart-name.picked {
+  font-weight: 700;
+  fill: var(--accent);
+}
+
+/* --- what goes with what --- */
+
+/* The lines between interests people hold together, in the ink, faint, and
+   darker and thicker the stronger. A pixel wide however far it is zoomed, so
+   they stay lines and never become bands. Nothing to point at: a press on a
+   line is a press on the sheet. */
+.chart-links path,
+.chart-link-picked line {
+  fill: none;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.chart-link {
+  stroke: var(--ink);
+}
+
+.chart-link.weight-0 {
+  stroke-opacity: 0.1;
+  stroke-width: 0.6px;
+}
+
+.chart-link.weight-1 {
+  stroke-opacity: 0.2;
+  stroke-width: 0.9px;
+}
+
+.chart-link.weight-2 {
+  stroke-opacity: 0.38;
+  stroke-width: 1.3px;
+}
+
+/* With one picked, its own lines in the accent and the rest further back;
+   and while searching, the lines stand back with the dots that did not
+   match. */
+#explorer-chart.linking .chart-link,
+#explorer-chart.searching .chart-link {
+  opacity: 0.45;
+}
+
+.chart-link-picked line {
+  stroke: var(--accent);
+  stroke-opacity: 0.8;
+}
+
+.chart-link-picked .weight-0 {
+  stroke-width: 1px;
+}
+
+.chart-link-picked .weight-1 {
+  stroke-width: 1.8px;
+}
+
+.chart-link-picked .weight-2 {
+  stroke-width: 2.8px;
+}
+
+/* The far ends of the picked one's strongest lines: named, whatever the
+   zoom. */
+#explorer-chart .chart-name.linked {
+  display: inline;
+  opacity: 1;
+}
+
+.chart-dots .dot.linked {
+  opacity: 1;
+  stroke: var(--accent);
+  stroke-width: 2px;
+}
+
+.explorer-with {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.explorer-with[hidden] {
+  display: none;
+}
+
+.explorer-with h4 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.explorer-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.explorer-found {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.explorer-found:empty {
+  display: none;
+}
+
+.explorer-found button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+  font-size: 13px;
+}
+
+.explorer-found .count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.explorer-more {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.explorer-pick h3 {
+  margin: 0 0 4px;
+  font-size: 17px;
+}
+
+.explorer-path {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.explorer-pick p {
+  font-size: 13px;
+}
+
+.explorer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* --- overlap labels --- */
 
 .zone-label text {
@@ -747,11 +2197,6 @@ input:disabled::placeholder {
   stroke-linejoin: round;
   letter-spacing: 0.02em;
   cursor: help;
-}
-
-.zone-label:hover text {
-  fill: var(--accent);
-  font-size: 17px;
 }
 
 /* --- funnel --- */
@@ -771,9 +2216,21 @@ input:disabled::placeholder {
   font-size: 13px;
   padding: 5px 7px;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: var(--radius-small);
   background: var(--bg);
   color: var(--ink);
+}
+
+/* The list to add from sits in the funnel's place in the column and is styled
+   as it is. What was just added is said beneath it. */
+.add-said {
+  margin: -6px 0 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.add-said:empty {
+  display: none;
 }
 
 .zoom-note {
@@ -798,12 +2255,29 @@ input:disabled::placeholder {
   border: 1px solid var(--line);
   background: var(--bg);
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   font-style: italic;
   line-height: 1;
   vertical-align: middle;
-  cursor: help;
+  /* `help` says "hover me", and this only answers a click — the same mistake
+     this stylesheet already diagnoses twice in its own words, for the minimap
+     and the zone labels. */
+  cursor: pointer;
+  /* Inherited from the uppercase section labels two of these sit inside,
+     which turned the `i` into an `I` in Firefox. */
+  text-transform: none;
+  letter-spacing: normal;
+  position: relative;
+}
+
+/* The circle stays 15px, which is the right size beside a line of small text,
+   and the part a finger has to land on grows past the 24px a finger needs.
+   An empty `content` draws nothing; it is a hit area, not a mark. */
+.info::after {
+  content: '';
+  position: absolute;
+  inset: -7px;
 }
 
 .info:hover,
@@ -812,26 +2286,17 @@ input:disabled::placeholder {
   color: var(--accent);
 }
 
-.tab {
-  display: inline-flex;
-  align-items: center;
-}
-
-.rooms-head,
-.composer-help {
-  margin: 10px 2px 0;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
+.info[aria-expanded='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--panel);
 }
 
 .composer-help {
   margin: 0;
   padding: 0 14px 10px;
-  text-transform: none;
-  letter-spacing: 0;
   font-size: 12px;
+  color: var(--muted);
 }
 
 .card {
@@ -840,7 +2305,7 @@ input:disabled::placeholder {
   width: 280px;
   padding: 11px 13px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--panel);
   box-shadow: 0 8px 28px rgb(0 0 0 / 0.14);
   font-size: 13px;
@@ -865,7 +2330,7 @@ input:disabled::placeholder {
 
 .card .last {
   padding: 6px 8px;
-  border-radius: 7px;
+  border-radius: var(--radius-small);
   background: var(--bg);
   color: var(--ink);
 }
@@ -882,16 +2347,40 @@ input:disabled::placeholder {
 .card .more {
   padding: 3px 9px;
   font-size: 12px;
-  border-radius: 999px;
+  border-radius: var(--pill);
   color: var(--accent);
   border-color: var(--accent);
 }
 
+/* A card on the drawing for the first visit. It goes once anything is joined,
+   or when it is closed. */
 .lede {
-  margin: 0 2px 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 26rem;
+  margin: 0;
+  padding: 8px 8px 8px 12px;
+  border-radius: var(--radius);
   font-size: 13px;
-  line-height: 1.5;
-  color: var(--muted);
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+/* A display of its own outranks the attribute, as everywhere else here. */
+.lede[hidden] {
+  display: none;
+}
+
+.lede p {
+  margin: 0;
+}
+
+.lede-close {
+  flex: none;
+  padding: 2px 9px;
+  font-size: 12px;
+  border-radius: var(--pill);
 }
 
 .fit-note {
@@ -900,13 +2389,69 @@ input:disabled::placeholder {
   color: var(--muted);
 }
 
+/* The one thing being offered, so it is filled rather than outlined — this is
+   the only place in the product where a button is asking to be pressed. */
 .join-here {
-  margin: 0 3px;
-  padding: 2px 9px;
-  font-size: 12px;
-  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--pill);
   border-color: var(--accent);
-  color: var(--accent);
+  background: var(--accent);
+  color: var(--panel);
+}
+
+.join-here:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--panel);
+  filter: brightness(1.08);
+}
+
+/* --- the way into a room you are looking at from outside ------------------ */
+
+.log .joining {
+  /* Centred, text and box alike: it stands in for a conversation that is not
+     there yet, so it sits in the middle of the space rather than reading as
+     the first message. */
+  margin: 4px auto 14px;
+  max-width: 32rem;
+  padding: 14px 16px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--raised);
+  text-align: center;
+}
+
+/* Zero specificity on purpose. As `.joining p` this outranked the single-class
+   rules below it, so every margin they set was silently thrown away and the
+   button row sat flush against the text on both sides. `:where` clears the
+   browser's paragraph margins without winning against anything. */
+:where(.joining) p {
+  margin: 0;
+}
+
+.joining-lead {
+  font-weight: 600;
+}
+
+.joining-why {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.joining-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.joining-note {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 /* The minimap promised something by turning the cursor into a hand, and then
@@ -921,11 +2466,6 @@ input:disabled::placeholder {
   cursor: pointer;
 }
 
-.view-name {
-  font-size: 13px;
-  color: var(--ink);
-}
-
 .privacy {
   display: inline-flex;
   align-items: center;
@@ -934,14 +2474,98 @@ input:disabled::placeholder {
   color: var(--muted);
 }
 
+/* A 13px box is not something a finger can aim at. Scaling keeps the native
+   control — and its theme, its focus ring and its keyboard behaviour — while
+   giving it a target of about 21px, and the label beside it is part of the
+   same target because it carries `for`. */
 .privacy input {
   margin: 0;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
 }
 
-.sealed-mark {
-  font-size: 10px;
+.privacy {
+  min-height: 32px;
+}
+
+.sealed-mark,
+.muted-mark {
+  font-size: 11px;
   color: var(--muted);
   margin-left: 5px;
+}
+
+/* What the server said when poked: set off as a system message is, with a
+   dashed rule, so it cannot pass for something somebody in the room said. */
+.poke-reply {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border: 1px dashed var(--edge);
+  border-radius: var(--radius-small);
+  background: var(--raised);
+}
+
+.poke-reply[hidden] {
+  display: none;
+}
+
+.poke-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.poke-head .machine-mark {
+  margin-left: 0;
+}
+
+.poke-private {
+  color: var(--muted);
+}
+
+.poke-text {
+  margin: 6px 0 8px;
+  font-style: italic;
+}
+
+.poke-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.poke-actions #poke-close {
+  margin-left: auto;
+}
+
+/* A system message: written by the server, not by a person. Labelled in words,
+   in a box of its own beside the name and at full strength rather than muted,
+   and the words themselves set off with a dashed rule and italic, so it reads
+   as different before the label is read and cannot pass for somebody talking. */
+.machine-mark {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 7px;
+  border: 1px solid var(--edge);
+  border-radius: var(--pill);
+  background: var(--raised);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  vertical-align: 1px;
+}
+
+.log li.machine {
+  padding-left: 10px;
+  border-left: 2px dashed var(--edge);
+}
+
+.log li.machine .text {
+  font-style: italic;
 }
 
 /* --- keys --------------------------------------------------------------- */
@@ -969,13 +2593,6 @@ input:disabled::placeholder {
   display: none;
 }
 
-.new-key {
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 999px;
-  color: var(--muted);
-}
-
 /* --- reporting ---------------------------------------------------------- */
 
 /* Present on every message and loud on none of them. Somebody looking for it
@@ -984,9 +2601,11 @@ input:disabled::placeholder {
   margin-left: auto;
   border: 0;
   background: none;
-  padding: 0 0.25rem;
+  /* Vertical padding rather than height, so the row keeps its rhythm while
+     the thing a finger has to hit is 24px tall rather than 18. */
+  padding: 4px 4px;
   font: inherit;
-  font-size: 0.75rem;
+  font-size: 12px;
   color: var(--muted);
   cursor: pointer;
   opacity: 0;
@@ -997,9 +2616,25 @@ li:hover .msg-action,
 .msg-action[disabled] {
   opacity: 1;
 }
+
+/* Where there is no hover there is nothing to reveal them, so reply, report
+   and delete were invisible and tappable at the same time. */
+@media (hover: none) {
+  .msg-action {
+    opacity: 1;
+  }
+}
+
 .msg-action:hover:not([disabled]) {
-  color: var(--warn);
+  color: var(--ink);
   text-decoration: underline;
+}
+
+/* Warn is for the two that cannot be taken back. Reply was wearing it too,
+   because the rule matched every action alike. */
+.msg-action.report:hover:not([disabled]),
+.msg-action.forget:hover:not([disabled]) {
+  color: var(--warn);
 }
 .msg-action[disabled] {
   cursor: default;
@@ -1011,17 +2646,17 @@ li:hover .msg-action,
 .votes {
   margin-left: auto;
   display: inline-flex;
-  gap: 0.4rem;
+  gap: 6px;
 }
 .votes + .msg-action {
-  margin-left: 0.6rem;
+  margin-left: 10px;
 }
 .vote {
   border: 0;
   background: none;
-  padding: 0 0.15rem;
+  padding: 4px 4px;
   font: inherit;
-  font-size: 0.75rem;
+  font-size: 12px;
   color: var(--muted);
   cursor: pointer;
 }
@@ -1033,59 +2668,185 @@ li:hover .msg-action,
 /* The statement that this place is public. It is the one thing on the page
    somebody must read before they type, so it does not look like help text. */
 .public-note {
-  margin: 0.4rem 0 0.2rem;
-  padding: 0.45rem 0.6rem;
+  margin: 6px 0 4px;
+  padding: 8px 10px;
   border-left: 3px solid var(--warn);
   background: var(--raised);
-  font-size: 0.8rem;
+  font-size: 13px;
   line-height: 1.4;
 }
 
 /* --- groups -------------------------------------------------------------- */
 
-.cluster-box {
-  margin-bottom: 1rem;
-  padding-bottom: 0.8rem;
-  border-bottom: 1px solid var(--line);
+/* --- groups, from the header --------------------------------------------- */
+
+/* The buttons along the header: Interests, the group and Settings. */
+.bar-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  font-size: 13px;
+  border-radius: var(--pill);
+  white-space: nowrap;
 }
-.cluster-box h3 {
-  margin: 0 0 0.3rem;
-  font-size: 0.85rem;
+
+/* Open, as the buttons on the map say it. Not for a group you are in, whose
+   button is already filled with the same colour. */
+.bar-button[aria-expanded='true']:not(.in) {
+  border-color: var(--accent);
+  color: var(--accent);
 }
-.cluster-now {
-  margin: 0 0 0.4rem;
-  font-size: 0.78rem;
+
+.group-button {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.group-button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* In a group, the button is the group: filled, and named, so being in one is
+   never something you have to remember. */
+.group-button.in {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--panel);
+  font-weight: 600;
+}
+
+.group-button.in:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--panel);
+  filter: brightness(1.08);
+}
+
+/* Under the button rather than inside the map, so it is placed against the
+   header and allowed the height of the window. */
+.group-pop {
+  top: calc(100% + var(--bar-pad) + 6px);
+  left: 0;
+  width: min(19rem, calc(100vw - 24px));
+  max-height: calc(100dvh - 96px);
+}
+
+.group-lead {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.45;
   color: var(--muted);
 }
-.cluster-actions {
-  display: flex;
-  gap: 0.4rem;
-  margin-bottom: 0.4rem;
-}
-.cluster-join {
-  display: block;
-  font-size: 0.75rem;
-  color: var(--muted);
-}
-.cluster-join input {
+
+/* The one thing this panel is for, so it is filled and full width. */
+.group-primary {
   width: 100%;
-  margin-top: 0.2rem;
+  padding: 9px 14px;
+  font-weight: 600;
+  border-radius: var(--pill);
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--panel);
 }
+
+.group-primary:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--panel);
+  filter: brightness(1.08);
+}
+
+.group-join {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.group-join-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.group-join-row input {
+  flex: 1;
+}
+
+.group-error {
+  margin: 6px 0 0;
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.group-error:empty {
+  display: none;
+}
+
+/* Big enough to read out across a table, and selected whole on a tap. */
+.group-name {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-align: center;
+  user-select: all;
+}
+
+.group-count {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.group-count:empty {
+  display: none;
+}
+
+.group-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.group-actions button {
+  flex: 1;
+}
+
+.cluster-link {
+  margin: 8px 0 0;
+  text-align: center;
+}
+
 .cluster-link a {
-  font-size: 0.72rem;
+  font-size: 11px;
   word-break: break-all;
 }
 
+.group-leave {
+  display: block;
+  margin: 10px auto 0;
+  padding: 4px 11px;
+  font-size: 12px;
+  border-radius: var(--pill);
+  color: var(--muted);
+}
+
 /* The invitation, drawn as a grid of elements. Not a picture: this place does
-   not do pictures, and a grid of squares is what the thing actually is. */
+   not do pictures, and a grid of squares is what the thing actually is.
+   Dark on white in either theme, since that is what a camera reads, with
+   four modules of white round it: the quiet zone the standard asks for, and
+   what a phone needs to find the edge against a dark page. */
 .cluster-qr {
+  --qr-width: min(15rem, calc(100vw - 72px));
   display: grid;
   grid-template-columns: repeat(var(--qr-size, 25), 1fr);
-  width: min(11rem, 100%);
-  margin: 0.5rem 0;
-  padding: 0.5rem;
+  width: var(--qr-width);
+  margin: 10px auto;
+  padding: calc(var(--qr-width) * 4 / (var(--qr-size, 25) + 8));
   background: #fff;
-  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
 }
 .cluster-qr i {
   aspect-ratio: 1;
@@ -1101,33 +2862,33 @@ li:hover .msg-action,
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.15rem;
-  margin: 0.35rem 0 0.5rem;
-  padding: 0.5rem 0.6rem;
+  gap: 2px;
+  margin: 6px 0 8px;
+  padding: 8px 10px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-small);
   background: var(--raised);
-  max-width: 22rem;
+  max-width: 352px;
 }
 .why strong {
-  font-size: 0.82rem;
-  margin-bottom: 0.15rem;
+  font-size: 13px;
+  margin-bottom: 2px;
 }
 /* The consent line before an encrypted message is shown to anybody. It is the
    one thing in this panel that must be read, so it does not look like the
    rest of it. */
 .why .discloses {
-  margin: 0 0 0.35rem;
-  font-size: 0.76rem;
+  margin: 0 0 6px;
+  font-size: 12px;
   line-height: 1.35;
   color: var(--warn);
 }
 .why-choice {
   border: 0;
   background: none;
-  padding: 0.2rem 0;
+  padding: 4px 0;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: 13px;
   text-align: left;
   cursor: pointer;
   color: inherit;
@@ -1137,14 +2898,127 @@ li:hover .msg-action,
   text-decoration: underline;
 }
 .why-cancel {
-  margin-top: 0.25rem;
+  margin-top: 4px;
   border: 0;
   background: none;
-  padding: 0.2rem 0;
+  padding: 4px 0;
   font: inherit;
-  font-size: 0.75rem;
+  font-size: 12px;
   color: var(--muted);
   cursor: pointer;
+}
+
+/* --- muting -------------------------------------------------------------- */
+
+/* Messages from somebody muted, folded into one quiet line per run. Quiet
+   rather than gone, so a conversation with a hole in it says where the hole
+   is, and the words are one press away for anybody who wants them. */
+.log .muted-run {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--muted);
+}
+
+.muted-run button {
+  border: 0;
+  background: none;
+  padding: 4px 2px;
+  font: inherit;
+  font-style: normal;
+  color: var(--muted);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.muted-run button:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+/* The offer to mute somebody, after the message that prompted it. Set off
+   like the note above the composer, and in the edge colour rather than the
+   warning one: it is a question, not an alarm. */
+.log .mute-offer {
+  max-width: 32rem;
+  padding: 8px 10px;
+  border-left: 3px solid var(--edge);
+  background: var(--raised);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* Zero specificity, for the reason given at `.joining`. */
+:where(.mute-offer) p {
+  margin: 0;
+}
+
+.mute-offer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.mute-offer-actions button {
+  padding: 3px 12px;
+  font-size: 12px;
+  border-radius: var(--pill);
+}
+
+/* Muted people, in Settings, each with the way back beside them. */
+.muted-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.muted-list:empty {
+  display: none;
+}
+
+.muted-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 13px;
+}
+
+.muted-who {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.muted-list button {
+  flex: none;
+  padding: 2px 10px;
+  font-size: 12px;
+  border-radius: var(--pill);
+}
+
+/* A setting that is a single tick, with its words beside it. The words are
+   part of the target, since the label carries `for`. */
+.settings-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  min-height: 28px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.settings-check input {
+  flex: none;
+  margin: 0;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
 }
 
 /* --- replies ------------------------------------------------------------- */
@@ -1153,18 +3027,18 @@ li:hover .msg-action,
    smaller, so a thread reads as a conversation rather than as a stack of
    equally loud statements. */
 .quoted {
-  margin: 0.1rem 0 0.15rem 0.6rem;
-  padding-left: 0.5rem;
+  margin: 2px 0 2px 10px;
+  padding-left: 8px;
   border-left: 2px solid var(--line);
-  font-size: 0.76rem;
+  font-size: 12px;
   color: var(--muted);
 }
 .replying {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin: 0.3rem 0 0;
-  font-size: 0.76rem;
+  gap: 8px;
+  margin: 4px 0 0;
+  font-size: 12px;
   color: var(--muted);
 }
 
@@ -1181,4 +3055,681 @@ li:hover .msg-action,
   color: var(--warn);
   cursor: pointer;
   text-decoration: underline;
+}
+
+/* --- how the place looks --------------------------------------------------- */
+
+/* The sheet somebody chooses a scheme from. Down one edge and not modal: the
+   thing being chosen is the page, so the page stays in view, undimmed and
+   still working, and changes under the sheet as each card is pressed. On a
+   phone there is no edge to spare, so it comes up from the bottom and stops
+   halfway for the same reason. */
+.appearance {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 30;
+  width: 100%;
+  height: 56dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-width: 1px 0 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 0 28px rgb(0 0 0 / 0.22);
+  overflow: hidden;
+}
+
+.appearance[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.appearance-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px calc(16px + env(safe-area-inset-bottom));
+}
+
+.schemes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 8px;
+}
+
+/* A card is a picture of the scheme with its name under it. The picture is
+   coloured inline, from the scheme it shows — the one place in the stylesheet
+   that must not follow the tokens, since its whole job is to show what the
+   tokens would become. */
+.scheme {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  padding: 5px 5px 6px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-small);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.scheme:hover {
+  border-color: var(--ink);
+}
+
+/* Which one is being worn, said with weight and a second line round the card
+   as well as with colour. */
+.scheme[aria-pressed='true'] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  font-weight: 600;
+}
+
+.scheme-name {
+  padding: 0 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.scheme-page {
+  display: block;
+  flex: 1;
+  padding: 6px;
+  border-radius: 4px;
+}
+
+.scheme-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 7px 7px 6px;
+  border: 1px solid;
+}
+
+.scheme-bar {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+}
+
+.scheme-ink {
+  width: 70%;
+}
+
+.scheme-muted {
+  width: 90%;
+}
+
+.scheme-accent {
+  width: 38%;
+  height: 8px;
+  margin-top: 2px;
+}
+
+/* "Match system" is two things, so it is drawn as both. */
+.scheme-both {
+  display: flex;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.scheme-both .scheme-page {
+  border-radius: 0;
+  min-width: 0;
+}
+
+.adjust {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.adjust h3 {
+  display: inline-block;
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.adjust-row {
+  display: grid;
+  grid-template-columns: 9.5em 1fr;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  font-size: 13px;
+}
+
+.adjust-mode,
+.adjust-check {
+  display: flex;
+  gap: 16px;
+}
+
+.adjust-mode label,
+.adjust-check {
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.adjust-mode label {
+  display: inline-flex;
+}
+
+.adjust input[type='range'] {
+  width: 100%;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+/* The track is painted inline with the colours the slider really chooses
+   between; see `wheelOf`. */
+.adjust .hue {
+  height: 22px;
+}
+
+/* A slider whose track is the answer. A browser draws its own track over any
+   background given to a range input, so a painted track needs the native one
+   switched off and a thumb put back by hand — which is also why the hue wheel
+   beside each interest never showed its rainbow until this rule. The thumb is
+   a ring in the page's own ink and panel, so it can be seen on every colour
+   the track passes through. */
+.adjust .hue,
+.picker input[type='range'] {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--edge);
+  border-radius: var(--pill);
+  cursor: pointer;
+}
+
+.adjust .hue::-webkit-slider-thumb,
+.picker input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--panel);
+  border: 3px solid var(--ink);
+}
+
+.adjust .hue::-moz-range-thumb,
+.picker input[type='range']::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--panel);
+  border: 3px solid var(--ink);
+}
+
+.adjust .hue:focus-visible,
+.picker input[type='range']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.adjust select {
+  font: inherit;
+  padding: 4px 6px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-small);
+  background: var(--bg);
+  color: var(--ink);
+}
+
+/* Wide, it covers the conversation and leaves the map and the lists in view,
+   since those are where a scheme shows most — the subject colours are solved
+   against the paper, so they move too. Which side that is depends on which
+   way round somebody has put the panels. */
+@media (min-width: 900px) {
+  .appearance {
+    inset: 0 0 0 auto;
+    width: 400px;
+    height: 100dvh;
+    border-width: 0 0 0 1px;
+    border-radius: 0;
+  }
+
+  /* As a window the map starts out top right, so that counts as the right. */
+  body[data-dock='right'] .appearance,
+  body[data-dock='float'] .appearance {
+    inset: 0 auto 0 0;
+    border-width: 0 1px 0 0;
+  }
+}
+
+/* --- the emblems and the patterns ----------------------------------------- */
+
+/* What a subject wears, over the rooms it takes in: its field's emblem, sown
+   across the ground the way a printed map sows reeds over a marsh, or a plain
+   pattern when the hierarchy has never heard of it. Faint either way. It is
+   there to be noticed — this corner is chemistry, those two patches are not
+   the same subject — and the labels are what is there to be read.
+
+   The tiles are drawn in `currentColor`, so the colour set on the map below
+   is what they come out in — the theme's ink, which shows against a pale
+   fill and against a dark one. */
+.texture {
+  pointer-events: none;
+  opacity: 0.3;
+}
+
+/* The small squares in the lists. A subject's colour with its emblem or its
+   pattern on it, which is the same drawing the map uses. */
+.glyph {
+  display: block;
+  border-radius: 3px;
+  flex: none;
+}
+
+/* A room is the subjects it is made of, so a chip carries one square per
+   subject rather than one dot of their average. */
+.chip-glyphs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+/* The swatch is a button wrapped round a drawing now, so it has no size of
+   its own to set. */
+.swatch {
+  width: auto;
+  height: auto;
+  background: none;
+  line-height: 0;
+}
+
+
+/* --- one subject away ----------------------------------------------------- */
+
+/* A suggestion that can say why it is a suggestion. The reason takes a line
+   of its own under the name, so the row above it still scans as every other
+   row in this list does. */
+/* --- browsing the catalogue ------------------------------------------------ */
+
+/* The way back up: All / sport / racket sports. */
+.subjects .crumbs {
+  display: block;
+  padding: 2px 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.crumbs button {
+  padding: 1px 8px;
+  font-size: 12px;
+  border-radius: var(--pill);
+}
+
+.crumbs strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* A category's name is the way into it. It reads as a name and not as one
+   more pill beside Join, with a chevron drawn in borders like the other
+   things here that open. */
+.subjects .browse-into {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--ink);
+  font-weight: 600;
+  text-align: left;
+}
+
+.subjects .browse-into::after {
+  content: '';
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+}
+
+.subjects .browse-into:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+/* A little of what is in it, under the name. */
+.category .inside {
+  flex-basis: 100%;
+  margin: 0 0 2px 21px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.discovery .why-this {
+  flex-basis: 100%;
+  margin: 0 0 2px 21px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.discovery .why-this strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------------------------
+   Enough room to stop taking turns.
+
+   At this width both panels fit side by side, so the bar at the bottom has
+   nothing left to do and the views stop being places you go to. This is the
+   only breakpoint in the file, and everything above it is the phone.
+   --------------------------------------------------------------------------- */
+
+@media (min-width: 900px) {
+  /* The map down the left, the conversation down the right, each the whole
+     height. The interests used to share the map's column, and are a dialog
+     now, so the map has all of it: it is the one thing here whose usefulness
+     is a function of its area. The division is yours to move — the custom
+     property below is what the handle writes, and what the browser
+     remembers. `body[data-dock]` says where the map is: `left`, `right`, or
+     `float` once it has been pulled out as a window. */
+  body {
+    --talk: 58%;
+    grid-template-columns: minmax(280px, 1fr) minmax(240px, var(--talk));
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas:
+      'bar   bar'
+      'map   talk';
+  }
+
+  /* The other way round. The areas swap, and nothing else has to know —
+     which is the whole reason the layout is named areas rather than
+     first-column-second-column. */
+  body[data-dock='right'] {
+    grid-template-columns: minmax(240px, var(--talk)) minmax(280px, 1fr);
+    grid-template-areas:
+      'bar   bar'
+      'talk  map';
+  }
+
+  /* The map is a window, and the conversation has the page. */
+  body[data-dock='float'] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'bar'
+      'talk';
+  }
+
+  /* The handle. It sits in the gutter the panels already leave between them,
+     so it takes no space of its own and nothing moves when it appears. */
+  .splitter {
+    display: block;
+    position: relative;
+    z-index: 2;
+    background: none;
+    border: 0;
+    padding: 0;
+  }
+
+  .splitter::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: var(--pill);
+    background: transparent;
+    transition: background-color 120ms ease;
+  }
+
+  .splitter:hover::after,
+  .splitter:focus-visible::after {
+    background: var(--accent);
+  }
+
+  .splitter:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .splitter-col {
+    grid-row: 2;
+    grid-column: 1;
+    justify-self: end;
+    width: 9px;
+    margin-right: -4px;
+    cursor: col-resize;
+  }
+
+  .splitter-col::after {
+    inset: 8px 3px;
+  }
+
+  /* Nothing to divide once the map is out of its side. The handle is always
+     the trailing edge of the first column, whichever panel that is. */
+  body[data-dock='float'] .splitter {
+    display: none;
+  }
+
+  /* Both at once, whatever view was last chosen on a narrow screen. Written
+     at the same weight as the rules that hide them on a phone, so these win
+     by coming later rather than by accident. The gutter between the two is
+     the narrow side of each, so it follows the map from side to side. */
+  main,
+  body[data-view='map'] main {
+    grid-area: talk;
+    display: flex;
+    padding: 16px 16px 16px 8px;
+  }
+
+  .map,
+  body[data-view='talk'] .map {
+    grid-area: map;
+    display: flex;
+    margin: 16px 8px 16px 16px;
+    padding: 0;
+  }
+
+  body[data-dock='right'] main {
+    padding: 16px 8px 16px 16px;
+  }
+
+  body[data-dock='right'] .map {
+    margin: 16px 16px 16px 8px;
+  }
+
+  body[data-dock='float'] main {
+    padding: 16px;
+  }
+
+  /* --- the map, as a window --- */
+
+  /* Out of the grid and over the conversation, where the four properties the
+     drag writes say. Under the header, so the menus that hang out of it still
+     open over the window, and the window is kept below it so its bar cannot
+     be lost behind it; see `placeFloat`. The shadow is what says it is on top
+     of the page rather than part of it. */
+  body[data-dock='float'] .map {
+    position: fixed;
+    z-index: 5;
+    left: var(--float-x, auto);
+    top: var(--float-y, 96px);
+    width: var(--float-w, 520px);
+    height: var(--float-h, 440px);
+    margin: 0;
+    border-color: var(--edge);
+    box-shadow: 0 12px 40px rgb(0 0 0 / 0.28);
+    /* What everything that floats on the drawing is pushed down by. */
+    --map-top: 34px;
+  }
+
+  body[data-dock='float'] .map-bar {
+    display: flex;
+  }
+
+  body[data-dock='float'] .map-edge {
+    display: block;
+  }
+
+  /* The way out, where there is room to be out in. */
+  .map-popout {
+    display: inline-flex;
+  }
+
+  /* The bar is the way back once it is out. */
+  body[data-dock='float'] .map-popout {
+    display: none;
+  }
+
+  /* A line of text stops being readable somewhere around eighty characters,
+     and the conversation is now most of the screen wide. The panel keeps its
+     width; the words inside it do not have to use all of it. */
+  .log li,
+  .room-head,
+  .public-note,
+  .composer {
+    max-width: 48rem;
+  }
+
+  .switch {
+    display: none;
+  }
+
+  .bar {
+    gap: 16px;
+    --bar-pad: 12px;
+    padding: var(--bar-pad) 16px;
+  }
+
+  .bar h1 {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip-path: none;
+    font-size: 17px;
+  }
+
+  .bar .interests-open {
+    display: inline-flex;
+  }
+
+  .settings-layout {
+    display: block;
+  }
+
+  .group-wrap {
+    max-width: 16rem;
+  }
+
+  .who {
+    flex: none;
+  }
+
+  .who input {
+    width: auto;
+  }
+
+  .who-says {
+    display: inline;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   A lurker.
+
+   Somebody who came in by a quick-join code sees the one conversation and
+   nothing of the rest: no map, no interests, no name, no key, no group. The
+   conversation has the whole page at any width, the header says what they
+   are, and where the box they would type in was is the way in instead. After
+   the breakpoint on purpose, so these win by coming last rather than by being
+   heavier. See `lib/lurk.js`.
+   --------------------------------------------------------------------------- */
+
+.lurk-pill {
+  display: none;
+}
+
+body[data-lurking] .lurk-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 11px;
+  border: 1px dashed var(--edge);
+  border-radius: var(--pill);
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+body[data-lurking] .bar > :not(h1, .lurk-pill),
+body[data-lurking] .map,
+body[data-lurking] .splitter,
+body[data-lurking] .switch,
+body[data-lurking] .public-note,
+body[data-lurking] .choices,
+body[data-lurking] .composer,
+body[data-lurking] .composer-help,
+body[data-lurking] .replying {
+  display: none;
+}
+
+body[data-lurking] main {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
+body[data-lurking] .room {
+  width: 100%;
+  max-width: 52rem;
+  margin: 0 auto;
+}
+
+.lurk-bar {
+  padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+}
+
+.lurk-bar[hidden] {
+  display: none;
+}
+
+.lurk-bar p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.lurk-bar strong {
+  color: var(--ink);
+}
+
+.lurk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.lurk-actions button {
+  border-radius: var(--pill);
 }

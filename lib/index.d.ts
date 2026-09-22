@@ -63,6 +63,12 @@ export function neighbourhood(
   subscription: Iterable<string>,
   limit?: number,
   index?: SubjectIndex,
+  options?: {
+    novelty?: number;
+    distance?: (a: string, b: string) => number;
+    /** Which subjects may be suggested; what is held is always shown. */
+    allowed?: (subject: string) => boolean;
+  },
 ): { subjects: string[]; hidden: string[]; suggested: string[] };
 
 // --- circle layout ---------------------------------------------------------
@@ -191,6 +197,13 @@ export interface AtlasOptions {
    * Shape only: the quotas still fix the areas, so exactness is unaffected.
    */
   mold?: boolean | (Omit<MoldOptions, 'anchors'> & { generations?: number });
+  /**
+   * Subjects that wrap all the others — held in every region, like a group's
+   * own conversation. The layout is worked out without them, so the regions
+   * sit as they would with no frame round them, and each frame's territory
+   * is the whole of the ground. Ignored for a frame some region lacks.
+   */
+  frames?: string[];
 }
 
 /**
@@ -221,6 +234,75 @@ export function hue(subject: string): number;
 export function blend(subjects: Iterable<string>): number;
 export function stroke(subject: string): string;
 export function regionFill(subjects: string[]): string;
+
+/** The colour at a hue that throws exactly `target` luminance, as hex. */
+export function colourAt(hue: number, target: number, chroma?: number, step?: number): string;
+/** How much light a `#rrggbb` throws, from 0 to 1. */
+export function luminance(colour: string): number;
+/** The contrast ratio between two colours, from 1 to 21. */
+export function contrast(a: string, b: string): number;
+/**
+ * Say what the subject colours are read against. Light paper dimmer than
+ * white brings every tier down together until the brightest clears 3:1;
+ * null goes back to the built-in themes. Returns the tiers now in force.
+ */
+export function setPaper(luminance: number | null): number[];
+/** The brightest a dark panel may be and still have the subject colours clear 3:1 on it. */
+export const DARKEST_PAPER: number;
+
+// --- schemes ---------------------------------------------------------------
+
+export type Face = 'standard' | 'soft' | 'book' | 'typewriter';
+
+/**
+ * How the place looks, as a recipe rather than a list of colours. Every
+ * colour is worked out from this at a fixed contrast, so no recipe is
+ * illegible.
+ */
+export interface Recipe {
+  mode: 'light' | 'dark';
+  /** Hue the surfaces are tinted with, in OKLCH degrees. */
+  tint: number;
+  /** How strongly, from 0 (grey) to 1. */
+  wash: number;
+  /** How bright the paper is within its mode, from 0 to 1. */
+  paper: number;
+  /** Hue of links, buttons and focus, in OKLCH degrees. */
+  accent: number;
+  face: Face;
+  /** Corner radius in pixels, 0 to 16. */
+  corners: number;
+  /** Raise every contrast a step. */
+  strong: boolean;
+}
+
+export interface Tokens {
+  bg: string; panel: string; raised: string; line: string; edge: string;
+  muted: string; ink: string; accent: string; warn: string;
+}
+
+export interface Scheme { id: string; name: string; recipe: Recipe }
+
+/** Twenty to start from: ten light, ten dark. */
+export const SCHEMES: Scheme[];
+export const FACES: Record<Face, string>;
+export const HOUSE: { light: Tokens; dark: Tokens };
+export const PROPERTIES: string[];
+export const ROUNDEST: 16;
+
+/** A recipe with every field present and in range; bad fields fall back one at a time. */
+export function tidy(recipe: unknown): Recipe;
+/** The nine colours a recipe comes to. */
+export function tokensOf(recipe: Partial<Recipe>): Tokens;
+/** A recipe as the custom properties the stylesheet reads. */
+export function styleOf(recipe: Partial<Recipe>): Record<string, string>;
+/** Luminance of the panel the map is drawn on, for `setPaper`. */
+export function paperOf(recipe: Partial<Recipe>): number;
+/** The colours a hue slider actually chooses between, for painting its track. */
+export function wheelOf(recipe: Partial<Recipe>, stops?: number): string[];
+export function schemeNamed(id: string): Scheme | null;
+/** What a browser remembered, read back as `system`, a seeded id, or `custom`. */
+export function readChoice(saved: unknown): { scheme: string; recipe: Recipe | null; custom: Recipe | null };
 
 // --- notifications ---------------------------------------------------------
 
@@ -260,6 +342,9 @@ export interface Notification {
   title: string;
   body: string;
   from?: string;
+  /** Who wrote it: their id, and the key they had shown, if any. */
+  fromId?: string | null;
+  fromKey?: string | null;
   messageId?: string;
 }
 
@@ -286,8 +371,18 @@ export const RANK: Record<Level, number>;
 /** `child: parent`. Roots simply have no entry. */
 export type Hierarchy = Record<string, string>;
 
-/** A small default hierarchy, enough to anchor common subjects. */
+/**
+ * The bundled catalogue: a little over eleven hundred interests under a dozen
+ * divisions, from fields of study to `narrowboats`. Every name is a subject a
+ * server will accept, and `stock` puts them all into a world.
+ */
 export const knowledge: Hierarchy;
+
+/** What people type when they mean a name in `knowledge`: `soccer` is `football`. */
+export const alsoCalled: Record<string, string>;
+
+/** What sits directly under each name, sorted; the divisions are under `knowledge`. */
+export function childrenOf(parents?: Hierarchy): Map<string, string[]>;
 
 export interface Placed {
   x: number;
@@ -298,9 +393,10 @@ export interface Placed {
 }
 
 /**
- * Coordinates for every node of a hierarchy, laid out radially so that
- * siblings are adjacent and unrelated branches are far apart. Deterministic,
- * and tolerant of cycles — a hierarchy baked out of Wikipedia will have them.
+ * Coordinates for every node of a hierarchy: a compact patch of the disc to
+ * each branch, so that siblings are adjacent and unrelated branches are far
+ * apart however many names there are. Deterministic, and tolerant of cycles —
+ * a hierarchy baked out of Wikipedia will have them.
  */
 export function radialLayout(
   parents: Hierarchy,
@@ -374,6 +470,34 @@ export function shortLabels(subjects: Iterable<string>): Map<string, string>;
 
 /** `mu + p + ma` — how an overlap is written on the map. */
 export function abbreviate(subjects: string[], labels: Map<string, string>): string;
+
+// --- emblems ---------------------------------------------------------------
+
+/**
+ * One shape of an emblem, on a 24-unit square. A `path` is stroked at `width`
+ * unless it is `solid`, in which case it is filled even-odd; a `circle` or a
+ * `rect` is filled unless it is `hollow`.
+ */
+export type EmblemShape =
+  | { shape: 'path'; d: string; width?: number; solid?: true }
+  | { shape: 'circle'; cx: number; cy: number; r: number; hollow?: true; width?: number }
+  | { shape: 'rect'; x: number; y: number; w: number; h: number; rx?: number; hollow?: true; width?: number };
+
+/** Every drawing there is, by the division or field it is a drawing of. */
+export const EMBLEMS: Record<string, EmblemShape[]>;
+
+/** The side of the square every emblem is drawn on. */
+export const EMBLEM_SIZE: 24;
+
+/**
+ * Which emblem a subject wears — the name of the field or division it is drawn
+ * as — or null when the hierarchy cannot place it. `entomology` gives
+ * `biology`; `modern painting` and `kite-fox-9/art` give `visual art`.
+ */
+export function emblemOf(subject: string, parents?: Record<string, string>): string | null;
+
+/** The shapes of a subject's emblem, or null. */
+export function emblem(subject: string, parents?: Record<string, string>): EmblemShape[] | null;
 
 // --- sealing ---------------------------------------------------------------
 
@@ -450,6 +574,40 @@ export declare const MARK_LENGTH: number;
 
 /** The part of a key's fingerprint that is written after a name. */
 export function mark(keyId: string | null | undefined): string;
+
+// --- portals ---------------------------------------------------------------
+
+/** How a portal's name begins, so that the open read side can recognise one. */
+export declare const PORTAL_PREFIX: string;
+
+/** Whether a subject is a portal. */
+export function isPortal(subject: string | null | undefined): boolean;
+
+/** Whether a region is a portal, or contains one. */
+export function isPortalRoom(roomKey: string | null | undefined): boolean;
+
+/** The day, in UTC, as both sides of a portal will spell it. */
+export function dayOf(when?: Date | string): string;
+
+/**
+ * The room name two people share today, derived from a secret only they can
+ * compute. Both sides arrive at it without either of them sending it, and it
+ * changes daily, so an address that leaks stops working.
+ *
+ * It hides the address and, with `seal`, the words. It does not hide that two
+ * people are talking or when — the server still routes. See `lib/portal.js`.
+ */
+export function portalWith(
+  me: Pick<Identity, 'pair'>,
+  theirPublicKey: JsonWebKey,
+  options?: { on?: Date | string },
+): Promise<string>;
+
+/** Today's address and yesterday's, so a conversation survives midnight. */
+export function portalsWith(
+  me: Pick<Identity, 'pair'>,
+  theirPublicKey: JsonWebKey,
+): Promise<[string, string]>;
 
 /** The short name of a public key; the same key always names itself the same. */
 export function fingerprint(key: JsonWebKey): Promise<string>;
@@ -592,6 +750,14 @@ export function within(cluster: string | null, subject: string): string;
 export function clusterOf(subject: string): string | null;
 /** The subject without the cluster in front of it, for showing to people. */
 export function label(subject: string): string;
+/** `everyone`: the group's own conversation, which every room in the group sits inside. */
+export const GROUP_ROOM: 'everyone';
+export function groupRoom(cluster: string): string;
+export function isGroupRoom(subject: string): boolean;
+/** A room's subjects without the group's own conversation, unless that is all it is. */
+export function inner(subjects: Iterable<string>): string[];
+/** A room's subjects as a person reads them: `inner`, without the prefix. */
+export function named(subjects: Iterable<string>): string[];
 export function inviteLink(origin: string, cluster: string): string;
 export function clusterFromLink(href: string): string | null;
 

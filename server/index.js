@@ -69,6 +69,16 @@ for (const [i, arg] of process.argv.entries()) {
   if (arg === '--moderator' && process.argv[i + 1]) moderators.push(process.argv[i + 1]);
 }
 
+/**
+ * `--questions [seconds]`: now and then, one of the sample people asks an
+ * on-topic question in a quiet room, labelled as a system message. Every
+ * minute or so by default; a number after the flag sets the interval. Only
+ * ever as a sample person, so in a world of real people it does nothing.
+ */
+const asked = process.argv.indexOf('--questions');
+const every = asked > -1 ? Number(process.argv[asked + 1]) : NaN;
+const questions = asked < 0 ? false : { every: (Number.isFinite(every) && every > 0 ? every : 60) * 1000 };
+
 // This server is the public one: it is the deployment that decided everything
 // said here is readable by anybody. A library consumer gets the opposite
 // default and has to ask for it.
@@ -76,7 +86,11 @@ const chat = createEulerChat({
   world,
   publicApi: true,
   moderators: moderators.map((m) => m.trim()).filter(Boolean),
+  questions,
 });
+if (questions) {
+  console.log(`eulerchat: sample people will ask a question, labelled as a system message, about every ${questions.every / 1000}s`);
+}
 
 /**
  * Say why, on the way down.

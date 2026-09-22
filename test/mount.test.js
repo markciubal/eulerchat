@@ -133,3 +133,45 @@ test('the client can be left out entirely', async () => {
     chat.close();
   }
 });
+
+test('a file edited under a running server is served as it now is', async () => {
+  // Cached forever, a stylesheet changed on disk was never served again until
+  // the process restarted, which looks exactly like the change not working.
+  // Written into `public/` because that is the only place it serves from, under
+  // a name nothing else uses, and removed whatever happens.
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const name = `.probe-${process.pid}-${Date.now()}.css`;
+  const file = path.join(import.meta.dirname, '..', 'public', name);
+
+  const host = http.createServer((req, res) => {
+    if (!res.headersSent) res.writeHead(404).end('host says no');
+  });
+  const chat = createEulerChat({ world: seed(new World()), server: host });
+  const port = await listen(host);
+
+  try {
+    fs.writeFileSync(file, 'a { color: red }');
+    assert.equal((await get(port, `/public/${name}`)).body, 'a { color: red }');
+    // Served twice from the cache is still the same file.
+    assert.equal((await get(port, `/public/${name}`)).body, 'a { color: red }');
+
+    fs.writeFileSync(file, 'a { color: blue; }');
+    assert.equal((await get(port, `/public/${name}`)).body, 'a { color: blue; }');
+
+    // Same length, later time: a stat that only compared sizes would miss it.
+    fs.writeFileSync(file, 'a { color: teal; }');
+    const later = new Date(Date.now() + 5000);
+    fs.utimesSync(file, later, later);
+    assert.equal((await get(port, `/public/${name}`)).body, 'a { color: teal; }');
+
+    fs.rmSync(file);
+    assert.equal((await get(port, `/public/${name}`)).status, 404, 'a deleted file is not served from memory');
+    // And a directory is not a file.
+    assert.equal((await get(port, '/public/')).status, 404);
+  } finally {
+    fs.rmSync(file, { force: true });
+    chat.close();
+    host.close();
+  }
+});

@@ -55,6 +55,14 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/mold.js"
     },
+    "./scheme": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/scheme.js"
+    },
+    "./emblem": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/emblem.js"
+    },
     "./abbrev": {
       "types": "./lib/index.d.ts",
       "default": "./lib/abbrev.js"
@@ -78,6 +86,10 @@
     "./proof": {
       "types": "./lib/index.d.ts",
       "default": "./lib/proof.js"
+    },
+    "./portal": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/portal.js"
     },
     "./plain": {
       "types": "./lib/index.d.ts",
@@ -128,6 +140,7 @@
   "scripts": {
     "start": "node server/index.js",
     "start:large": "node server/index.js --interests 1000 --people 4000",
+    "start:questions": "node server/index.js --questions 30",
     "test": "node --test",
     "render": "node tools/render.js"
   },

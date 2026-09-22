@@ -17,8 +17,9 @@ import { census, layout, zones, atlas } from 'eulerchat';
 
 ```
 npm install
-npm start          # http://localhost:8787 — three hand-written subjects
+npm start          # http://localhost:8787 — 1,100 interests, three of them busy
 npm run start:large # 1000 interests, 4000 people
+npm run start:questions # the sample people ask questions, as system messages
 npm test
 
 node server/index.js --interests 300 --people 2000
@@ -143,7 +144,8 @@ notes.drain(userId);   // what they missed, most urgent first
 import { createEulerChat, World, seed } from 'eulerchat/app';
 
 const chat = createEulerChat({
-  world: seed(new World()),   // or your own, built with addSubject/addUser/join
+  world: seed(new World()),   // the catalogue and a few demo people; `stock(new World())`
+                              // for the catalogue alone; or build your own with addSubject
   server: myHttpServer,       // attaches to yours; omit to get its own
   mount: '/chat',             // lives under a path; omit for the root
   serveClient: true,          // also serve the bundled UI
@@ -208,16 +210,19 @@ rooms over your own transport, and building an atlas.
 | `eulerchat/knowledge` | a small default hierarchy |
 | `eulerchat/mold` | `Mold`, `weave` — what grows between them |
 | `eulerchat/abbrev` | `shortLabels`, `abbreviate` — naming the overlaps |
+| `eulerchat/scheme` | `SCHEMES`, `tokensOf`, `styleOf`, `tidy` — how the place looks, legibly |
+| `eulerchat/emblem` | `emblemOf`, `emblem`, `EMBLEMS` — what a subject's field looks like |
 | `eulerchat/seal` | `identity`, `rememberedIdentity`, `seal`, `unseal` — a key per message |
 | `eulerchat/proof` | `challenge`, `prove`, `mark` — showing a key is yours |
+| `eulerchat/portal` | `portalWith` — a room only two people can find |
 | `eulerchat/plain` | `plain` — words only: no images, no emoji |
-| `eulerchat/cluster` | `newCluster`, `within`, `inviteLink` — small groups by name |
+| `eulerchat/cluster` | `newCluster`, `within`, `inviteLink`, `groupRoom`, `named` — small groups by name |
 | `eulerchat/receipt` | `verify`, `findDeletion` — checking what was deleted |
 | `eulerchat/flag` | `scan`, `rank`, `REASONS` — which rooms need looking at |
 | `eulerchat/public-api` | `createPublicApi` — the open read side and the firehose |
 | `eulerchat/qr` | `qr`, `toText` — the invitation as a square |
 | `eulerchat/ledger` | `FileLedger`, `MemoryLedger` — the durable anchor |
-| `eulerchat/knowledge` | the bundled hierarchy, and `subfields()` |
+| `eulerchat/knowledge` | the bundled catalogue, `alsoCalled`, `childrenOf()`, `subfields()` |
 | `eulerchat/adapt` | `fromRows` — read the tables you already have |
 | `eulerchat/embed` | `mountMap`, `viewFor` — the map in an element you own |
 | `eulerchat/react` | `<EulerMap />` |
@@ -370,7 +375,7 @@ anonymous path changes when it is put in.
 - **It is a decision against anonymity, and it should be made knowingly.**
   Everything said under one key can be tied together by anybody, for as long as
   the key is kept — that is the point of it and the cost of it. So the way out
-  is as short as the way in: *new key*, beside the name, throws it away, and
+  is as short as the way in: *New key*, under *Settings*, throws it away, and
   whoever comes back is a stranger. `forgetIdentity()` is the same thing in
   code.
 - **A lost key is a lost name.** There is no account behind it and nobody to
@@ -458,7 +463,7 @@ world.useLedger(new FileLedger('./data/ledger.jsonl'));
 ```
 
 The conversations come back from the people who kept a copy. A browser with
-*keep my own copy* turned on offers what it has when it reconnects, and the
+*Keep my copy* turned on offers what it has when it reconnects, and the
 server accepts a message only if its hash is one it committed to at the time.
 That is what makes restoring from clients safe rather than reckless: without
 the anchor, a server rebuilding from client data is rebuilding from
@@ -546,6 +551,11 @@ The rule covers the interface too, and a test walks the whole source tree and
 fails if a pictograph appears anywhere in it. That is how the one I had put in
 a label was found.
 
+The one kind of drawing the interface does have is the kind the map already
+was: shapes made in code. The emblems beside subject names are that — see
+**The ground says what it is** — and nothing a person can say to another person
+can contain one.
+
 
 ## Small groups, by name
 
@@ -561,6 +571,32 @@ within(group, 'art');                    // 'kite-fox-9/art'
 inviteLink('https://example.com/', group);
 ```
 
+**A group wraps its rooms.** Every group has a conversation of its own,
+`kite-fox-9/everyone`, and holding anything in the group means holding it too;
+the server sees to that, and leaving it is leaving the group. Every room in the
+group is therefore inside it, so on the map its ground is exactly the area of
+the group's rooms, drawn as a dashed line round them with the group's name on
+the top edge. The cost is arity: a room can combine three subjects, and inside a
+group one of the three is always the group, so a group's rooms combine two
+interests at most.
+
+**Inside, a copy of the world outside.** Only the membership is
+different. Whatever is worked out from a name is worked out from the name without
+the prefix: `kite-fox-9/art` has art's colour and emblem, is anchored where art
+is, widens into the group's own `visual art`, and is suggested beside the group's
+copies of whatever art is suggested beside outside. Search and browse walk the
+whole catalogue and hand back the group's copies, and nobody is shown another
+group's rooms. The map lays a group out with its frame left out of the
+placement (the atlas's `frames` option), so the same people are drawn room for
+room as they would be outside, and the frame goes round the result.
+
+**The name is published.** `GET /api/rooms` lists every occupied room, and a
+group's room key contains its name — so a stranger scraping the open side gets
+`kite-fox-9` the moment anybody joins it, along with everything said inside.
+"Anyone who has the name can walk in" is true, and the set of people who have
+the name is everybody. For a conversation that should be hard to find, see
+**A portal** below.
+
 Share the link, or the square beside it, which is drawn as a grid of elements
 rather than as a picture. The encoder is checked cell for cell against an
 independent implementation across every version and error-correction level it
@@ -569,6 +605,121 @@ one, so that is bit-exact agreement rather than a scan. **It is a door with a na
 has the name can walk in, and anyone you share it with can share it onward.
 Right for the six people at your table; wrong for anything that would matter if
 a stranger read it. What is said inside is still public unless it is locked.
+
+
+## Quick join, to lurk
+
+Every open conversation has a **Quick join** code: a square to scan, or a
+link, `?watch=<room>`. Scanning it opens that one conversation to lurk in,
+which is close to a browser's private window:
+
+- **Reading along, not joining.** A lurker is not a member of anything. It is not
+  in the room's head count, not on the list an encrypted message is locked for (so
+  encrypted messages stay locked to it), and not told about anybody's key. The
+  server sends it that room's messages and nothing else (`World.look`, the
+  `watch` frame).
+- **Counted, never named.** Each room says how many are lurking in it,
+  on its chip, in its header and on its hover card. It is a number and never
+  who, kept by the server's connections rather than the world, and the people
+  in the room are told as it changes, because somebody talking deserves to
+  know how big the audience is.
+- **Nothing kept, nothing tied.** No key is made or shown, no earlier visit or
+  group is picked up, saved copies are not offered back, and nothing is written
+  to the device's storage.
+- **Nothing else on screen.** No map, no interests, no name or group. The
+  conversation has the page, and the header says *Lurking · just watching*.
+- **It ends when they decide.** *Join in* joins what the conversation is about,
+  inside its group if it is in one, and leaves it open. *Look around* shows the
+  rest of the place. Either way the device goes back to its own key, name and
+  group, and the `?watch` comes out of the address.
+
+A portal cannot be quick-joined: it is not for finding. The group invitation
+still joins the group outright, since a group is for talking in.
+
+## System messages
+
+Anything a person did not write is labelled as a **system message**: the lines
+the sample worlds are made with (`seed`'s handful, `populate`'s openers), and
+the questions below. They carry the sample people's names, because rooms are
+only ever spoken in by their members, and the label is what says nobody said
+them.
+
+`--questions [seconds]` (or `questions: true` / `{ every, quiet }` in
+`createEulerChat`) has one of the sample people put an on-topic question to a
+quiet room every minute or so: *What drew you to board games rather than
+somewhere else in games?* It is for demo worlds, so that walking into one is
+walking into something.
+
+- **Written offline.** `lib/questions.js` builds each question from the room's
+  own interests and from where the catalogue puts them: the field above an
+  interest, the interests beside it, both halves of an overlap. No model, no
+  network, nothing leaves the server. The sentences are questions to the room,
+  never claims about having done or read anything.
+- **Labelled, and the label cannot come off.** A message the server wrote
+  carries `machine: true`, set only by the server and part of the message's hash,
+  so a copy handed back after a restart cannot drop the label, and a person's
+  words cannot gain one. The browser prints *system message* beside the name
+  and sets the question in italic behind a dashed rule. Screen readers hear it
+  as a system message, and the open API carries the flag.
+- **Only ever as a sample person.** It asks only as people marked synthetic
+  (`addUser(name, { synthetic: true })`, as `seed` and `populate` make them) who
+  already stand in the room, and never as anybody real, online or not. In a
+  world of real people it asks nothing at all.
+- **Out of the way.** A question goes only to a room somebody online can read,
+  that no person has spoken in for three minutes, and never twice running. None
+  go inside a group or a portal, and a machine question never interrupts
+  anybody: it is counted, not notified.
+
+## A portal
+
+Every other room here is named after what it is about, and anybody can read
+the name — a room is a place, and places have addresses you can say out loud.
+A portal is the exception. Its name is derived from a secret two people
+already share, so both of them compute the same address and nobody else can
+compute it at all.
+
+```js
+import { portalWith } from 'eulerchat/portal';
+
+const address = await portalWith(me, theirPublicKey);   // 'portal-w4qk…'
+world.join(myId, world.addSubject(address));            // an ordinary subject
+```
+
+It is an ordinary subject as far as everything else is concerned. `T ⊆ S`
+routes it, the census counts it, and the notification rules classify it as the
+two-person room it is — none of that had to learn that portals exist.
+
+**Why derived rather than random.** A random name would also be hard to guess,
+which is what the group invitations above do. The difference is what happens
+next: a random name has to be sent to the other person somehow, it is a bearer
+token for as long as it exists, and once it has leaked it has leaked for good.
+A derived name is never transmitted — both sides recompute it from keys they
+already hold — and because the day goes into the derivation, an address that
+does leak stops working tomorrow. `portalsWith` returns today's and
+yesterday's, so a conversation survives midnight.
+
+The open read side does not carry these: not in `/api/rooms`, not in
+`/api/scrape`, not on the firehose, and asking for one by name gets the same
+404 a room that does not exist gets — a different answer would confirm the
+guess. The interface stops saying *everyone can read this* inside one, because
+there it would be false.
+
+**What it does not do**, which matters more than what it does:
+
+- **It does not hide that two people are talking, or when.** The server still
+  routes. It sees an opaque name, two members and a pattern of activity. Only
+  the address is hidden, and the words only if they are sealed as well.
+- **It does not authenticate anybody.** The public keys come from the server,
+  so a dishonest server can offer a key of its own and derive an address with
+  you. The same limit sealing has, for the same reason.
+- **It is not a lock.** Anyone who learns today's address can join like anybody
+  else; the routing has no idea portals exist. It is a door somewhere nobody
+  else can find, not a door that refuses to open. The daily rotation is what
+  makes that survivable rather than fatal.
+
+Still open: how the second person learns a portal has been opened. The server
+cannot be told without learning who is talking to whom, which is the thing
+being avoided — so discovery has to happen in the browser, and it is not built.
 
 
 ## Votes
@@ -758,9 +909,9 @@ different layer — **never touch the whole world to answer a local question**:
    session is asked a cheap question first and only the few that answer yes pay
    for a solve. At 1000 sessions a join redraws 27 of them.
 
-The rail follows the same rule: it lists what you hold, what is being suggested
-and a few busy rooms, never the catalogue. A thousand rows rebuilt on every
-push is the same mistake as a thousand-circle diagram.
+The list of interests follows the same rule: it shows what you hold, what is
+being suggested and a few busy rooms, never the catalogue. A thousand rows
+rebuilt on every push is the same mistake as a thousand-circle diagram.
 
 ### What the numbers do not cover
 
@@ -888,11 +1039,58 @@ const anchors = anchorsFor(subjects, where);
 atlas(zones(people, subjects), { anchors });
 ```
 
-The bundled hierarchy is three layers of academic fields of study: six or so
-divisions, the fields within them, and beneath those the subfields — and it is
-the subfields people join. Somebody joins `entomology`, not `biology`; the
-field above it is there to say where entomology *is*, so that it sits beside
-mycology and nowhere near topology before a single person has joined either.
+The bundled hierarchy is a dozen divisions, the fields within them, and
+beneath those the interests — and it is mostly the interests people join.
+Somebody joins `entomology`, not `biology`; the field above it is there to say
+where entomology *is*, so that it sits beside mycology and nowhere near
+topology before a single person has joined either.
+
+### What a fresh install is stocked with
+
+A little over eleven hundred interests. It used to be three, which was enough
+to show how the place works and not enough to give anybody a reason to stay:
+somebody who arrives and cannot find their thing concludes there is nothing
+here. It was filled in three passes, and each is a different reason to stay.
+
+- **The obvious** — football, cooking, dogs, television, parenting, personal
+  finance. If these are missing the place looks empty however much else there is.
+- **The niche** — fountain pens, lockpicking, narrowboats, roguelikes. The
+  rooms people cannot find elsewhere, and the ones that keep them.
+- **The modern** — large language models, pickleball, heat pumps, the
+  fediverse. Without them it reads as something nobody has looked at in ten years.
+
+The divisions are the six academic ones, hobbies, and five for the rest of
+life: sport, technology, entertainment, lifestyle and society. Where an
+interest is big enough to have interests of its own there is a fourth layer:
+`photography` holds `film photography`, `video games` holds `roguelikes`, and
+both are rooms.
+
+```js
+import { World, seed, stock } from 'eulerchat/app';
+
+stock(new World());   // the catalogue alone: interests, no people, nothing said
+seed(new World());    // that, and a few made-up people so the map has something on it
+```
+
+An interest with nobody in it costs a string in a set. It takes up no room on
+the map, which draws only what is occupied, and it is there to be found when
+the first person who wants it turns up.
+
+Found two ways. By **searching**, which also knows what people call things:
+`soccer` finds `football`, `dnd` finds `dungeons and dragons`, and nobody makes
+an empty room called `soccer` next door to the full one (`alsoCalled`, which
+only ever informs a search — it never renames a room somebody made on purpose).
+And by **browsing**, for whoever arrives with no word in mind:
+
+```js
+world.browse();                 // the dozen divisions, each with a few of what is in it
+world.browse('sport');          // its fields
+world.browse('racket sports');  // badminton, padel, pickleball, squash, table tennis, tennis
+```
+
+The interface lists these at the foot of the interests, a level at a time, and
+anything on any level can be joined from there. Only what a world actually has
+is shown, so a host that stocks its own short list sees that list, arranged.
 
 ### The funnel: joining narrow without being alone
 
@@ -918,11 +1116,11 @@ funnel. It never reaches the root: a room containing everybody is not a room.
 ### Hobbies, not only fields
 
 The taxonomy is academic in structure and not in content. Hobbies are the
-largest division in it — handcraft, cooking, games, outdoors, growing,
+largest division in it — handcraft, cooking, drinks, games, outdoors, growing,
 movement, tinkering, collections, playing music, writing — because a catalogue
 that only admits scholarship has nothing to offer somebody who came for bread
-and bicycles. Same three layers, so a hobby funnels upward exactly as a
-subfield does.
+and bicycles. Same layers, so a hobby funnels upward exactly as a subfield
+does.
 
 ### A facet is not a different subject
 
@@ -941,8 +1139,14 @@ A facet is only stripped when what remains is a subject the hierarchy actually
 knows, and that restraint is the whole safety of it — a rule that stripped
 unconditionally would quietly rename things nobody meant to rename.
 
-Laid out radially — siblings adjacent, unrelated branches apart — and
-deterministic. Names it does not know are left unanchored and placed by
+Laid out on a disc, a compact patch to each branch with a gutter between
+branches — siblings adjacent, unrelated branches apart — and deterministic.
+It used to give each branch a wedge of the circle, which holds up for three
+hundred names and not for a thousand: a field became a sliver a hundred units
+long and five degrees wide, and the two ends of `mathematics` were further
+apart than `algebra` was from `baking` next door. Across the bundled
+catalogue a subject is now nearer to a sibling than to a stranger from
+another division 99 times in 100. Names it does not know are left unanchored and placed by
 co-membership as before; a facet like `modern jazz` resolves to `jazz`, so a
 real catalogue anchors without anyone curating every phrasing. Cycles are
 tolerated, because a hierarchy baked out of Wikipedia will have them.
@@ -1006,6 +1210,147 @@ in user units and the scale between them is the thing being solved for, so
 widening the box to make room shrinks the very margin it widened for.
 `fitTo` solves for the scale first.
 
+### All interests, on one sheet
+
+The minimap is too small to go into, so pressing it (or **Explore all
+interests** in the View menu) opens it full size: every interest there is,
+held or not, laid out as on the minimap, sized by how many hold it, with the
+dozen divisions named over their patches.
+
+```js
+world.chart();   // every open interest, its place and its ancestors, plus
+                 // the divisions and fields named at the middle of each
+```
+
+It is asked for with a `chart` frame when the explorer opens rather than
+pushed, since it is about a hundred kilobytes that most visits never look at.
+Group rooms are left off it, and off the minimap: a group's `chess` is chess,
+lit as held there, and is nobody else's business.
+
+**Every ten seconds.** An open page asks for its map again every ten seconds,
+and for the chart too while the explorer is open, so how tall things stand
+keeps up with what is being said even when nobody joins or leaves. Nothing is
+asked while the page is out of sight. Each ask says which drawing it already
+has, and while that is still the drawing only the numbers come back:
+
+```js
+{ type: 'atlas', subjects: 5, have: 'a1b2…' }   // → { type: 'atlas', only: 'rooms', shape, rooms, subscription }
+{ type: 'chart', have: 'c3d4…' }                 // → { type: 'chart', only: 'activity', shape, activity: [[id, a], …] }
+```
+
+A map is about two hundred kilobytes and its rooms about two; the chart is
+about a hundred and fifty and how lively its interests are about ten. An ask
+without `have`, or with a drawing that is no longer current, gets the whole
+thing, named by `shape`. The server keeps each solved map by what it was
+drawn from (which subjects, how many hold each region of them, the group), so
+asking again costs a few milliseconds rather than a fresh solve, and only the
+rooms (how busy each is, and whether the asker is in it) are worked out anew.
+The page redraws at most every ten seconds for anything but its own change.
+
+- **Moving round.** Drag, scroll or pinch. Field names come in at 1.3 screen
+  pixels per unit of the sheet and interest names at 2.8. The thresholds are in
+  pixels rather than in how far it has been zoomed, since the same zoom on a
+  phone has a third of the room. Dots grow more slowly than the sheet (its zoom
+  to the power 0.4). An interest's facets sit in a tight knot round it, and dots
+  that grew with the sheet overlapped exactly as much however far in it went.
+- **Picking one.** Pressing a dot shows its name, its place (`arts › visual
+  art`) and how many hold it, with **Join**, **Leave**, **Open its
+  conversation** and **Browse** its field in the interests list.
+- **Finding one.** Typing lights the matches, dims the rest and lists the first
+  eight, and Enter flies to the first. That is also the way round it without a
+  pointer: a thousand dots are not something to tab through.
+
+### In relief: as tall as it is lively
+
+The map and All interests are drawn in 3D by default. Every conversation on
+the map stands as a block, and every interest in All interests as a column,
+as tall as it has been lively lately compared with the liveliest on the whole
+platform. **View → 3D** lays both flat again (remembered in the browser), and
+the turn buttons go round a twelfth of a turn at a time to see behind tall ones.
+
+```js
+world.activity();  // { rooms, subjects }: each 0..1 against the liveliest
+```
+
+- **What counts.** Every message, with its weight halving each hour
+  (`HALF_LIFE` in `lib/activity.js`). Messages per minute over five minutes,
+  which a room's card shows, is nought everywhere five minutes after the last
+  word; this way the relief stays put while the place is quiet, because
+  every message ages at the same rate and the ratios between rooms do not
+  change. System messages count, and so a stocked demo world is not flat.
+  Portals are not counted at all. Groups are counted but do not set the scale,
+  so nothing outside a group can tell from the heights that it is busy.
+- **Height.** The square root of activity, over a small floor: a room nobody
+  has spoken in yet is low, never flattened away.
+- **Moving round it.** The same gestures on the map and in All interests
+  (`public/gestures.js`). It is a thing to turn in the hand, so the gesture
+  used most is the one that turns it:
+
+  | gesture | does |
+  |---|---|
+  | one finger or the mouse, dragged | orbit: across turns, up and down tilts (flat: moves) |
+  | two fingers dragged | move |
+  | two fingers pinched | zoom |
+  | right or middle button, or Shift, dragged | move, with a mouse |
+  | trackpad: two fingers scrolled / pinched | move / zoom |
+  | mouse wheel | zoom, a notch at a time |
+  | double tap or double click (Shift: out), two-finger tap | zoom in (out) |
+
+  On a phone a tap on the map opens a conversation and leaves the map for it,
+  so a finger's tap waits a moment (`DOUBLE_GAP`) to be sure it is not the
+  first of a double tap; a mouse's click does not wait. Orbiting All interests
+  moves the thousand columns already drawn rather than drawing them again
+  (`reprojectChart`), and puts them back in order from the back only now and
+  then while moving and exactly once it stops, which took a frame from a
+  tenth of a second to about a fiftieth.
+- **How it is drawn.** Still SVG: the sheet is turned, then tilted away, which
+  is an affine map, so each room's flat drawing (colour, emblems, the edges of
+  its subjects' outlines) is laid on its top with one `transform`. Walls are
+  the room's own colour, lighter or darker by which way they face.
+  Because "further back" and "higher" both go straight up the screen, drawing
+  level by level from the ground up is enough to get the overlaps right, with
+  no sorting of shapes against each other. See `public/relief.js`. A room's
+  top is not over its own ground any more, so every top and wall carries
+  `data-zone`, and a press reads the room off what is drawn there.
+
+### A map that holds still
+
+The map is drawn again only when what it shows has changed. The server sends
+a fresh atlas after every change near anybody's interests, and most of those
+change nothing on a given screen, so each one is compared with what is drawn
+(`drawnAs`: the shapes, the names, and what decides each room's colour and
+height) and an identical one only brings the rooms list up to date. Drawn
+again, it keeps the view where it was: framed afresh only the first time, on
+**Reset view**, on switching 3D, and when what you hold has changed. Other
+people's changes redraw it at most once every ten seconds (`REDRAW_EVERY`),
+with the latest of them; your own — the first map, a new interest — at once. A panel
+that changes size reshapes the view rather than redrawing it, labels are
+rewritten only when their spelling changes, and nothing on the map or in All
+interests is text to select, so a double click zooms without painting a word
+blue. Measured in Chrome: no change to the map's DOM in ten seconds left alone,
+or on a resize.
+
+### Poke the server
+
+**Poke the server**, beside Quick join in an open conversation, sends a `poke`
+frame. The server answers with a question from its databank (`lib/questions.js`),
+made from that room's interests and where the catalogue puts them — or from
+something you hold, if the room gives it nothing to go on. The answer goes to
+whoever poked and nobody else, and nothing is posted: it appears above the box,
+marked as a system message, with **Use it** (into the box, to change or send as
+your own), **Another**, and a close button. Never made from a portal's name or a
+group's own conversation, and rate-limited like every other frame.
+
+### Adding from the list
+
+Interests has an **Add from the list** dropdown: the whole catalogue in one
+native `select`, the twelve divisions as its groups, and under each its fields
+and their interests, indented by how deep they sit
+(`arts` › `visual art` › `photography`). Choosing one joins it, with the
+**Also join** setting applied as usual. Ones already held are marked
+"joined" and cannot be picked again. It is filled from the same `chart` frame
+All interests uses, asked for when Interests opens.
+
 ### The overlaps are labelled
 
 The overlaps are the most interesting ground on the map and were the only part
@@ -1038,6 +1383,82 @@ somewhere else entirely.
 import { shortLabels, abbreviate } from 'eulerchat';
 abbreviate(['music', 'philosophy', 'math'], shortLabels(subjects));  // 'mu + p + ma'
 ```
+
+### The ground says what it is
+
+Colour tells two subjects apart and says nothing about either. So each field
+has an emblem — picture frames for visual art, the bust of a philosopher for
+philosophy, `+ − × =` for mathematics, a flask, an hourglass, an amphora — and
+a subject wears the emblem of the field it sits in. It is on the square beside
+the name in every list, and it is sown faintly across the subject's ground on
+the map, the way a printed map sows reeds over a marsh.
+
+Fifty-one are drawn: the seven divisions and the forty-four fields. Nothing
+below that needs one. `entomology` wears the helix because it is under
+`biology`; `modern painting` wears the frames because `painting` does; `art`
+and `math` find their way by a short list of the words people actually type. A
+name the hierarchy cannot place wears no emblem and gets a pattern generated
+from a hash of the name instead — stripes, dots, rings — so there is no subject
+with nothing on it, including the ones nobody has created yet.
+
+Every subfield of a field shares its emblem, so on the map each is sown at its
+own spacing and from its own starting corner. Where two of them overlap the
+marks interleave rather than landing on each other.
+
+```js
+import { emblemOf } from 'eulerchat/emblem';
+emblemOf('entomology');       // 'biology'
+emblemOf('kite-fox-9/art');   // 'visual art'
+emblemOf('topic 17');         // null — it wears a pattern
+```
+
+The emblems are geometry in [`lib/emblem.js`](lib/emblem.js) — paths, circles
+and rectangles on a 24-unit square. No image is loaded to draw one.
+
+
+### How it looks is yours to choose
+
+Under *Theme* in the header: twenty themes to start from, ten
+light and ten dark, and sliders to make your own from any of them. It is kept
+in this browser and sent nowhere.
+
+| light | dark |
+|---|---|
+| Paper, Sepia, Mint, Rose, Sky | Ink, Midnight, Forest, Plum, Ember |
+| Lavender, Sand, Newsprint, Ledger, Daylight | Slate, Terminal, Blueprint, Black, Starlight |
+
+**There are no colour pickers.** Pale grey text on a pale grey panel is a valid
+pair of hex codes, and nine free pickers make an interface unreadable in four
+clicks. A scheme is a *recipe* instead: light or dark, what hue the surfaces are
+tinted and how strongly, how bright the paper is, the highlight hue, the
+lettering, the corners, and whether to raise the contrast. Every colour on the
+page is then worked out from that, each placed at a fixed contrast against the
+panel it is read on, using the same search that places a subject colour. The
+contrasts are the ones the built-in themes were measured at, raised where
+needed so text clears 4.5:1 on all three surfaces and not only the panel. A
+test sweeps more than nine hundred recipes, across every tint, strength,
+brightness and highlight, and checks each against those bars.
+
+The subject colours move too, a little. They were tuned to clear 3:1 against
+white and against the dark panel, and a cream or pale green throws less light
+than white, so on tinted paper all three brightness tiers come down together
+until the brightest clears it again. Hue is what tells subjects apart, and it
+never changes. Dark paper is held under the brightness where the dimmest tier
+would fail rather than moving the colours up, because that would cost the white
+emblem drawn on each swatch its contrast.
+
+```js
+import { SCHEMES, tokensOf, styleOf } from 'eulerchat/scheme';
+
+tokensOf({ mode: 'dark', tint: 150, wash: 0.9, accent: 140 });
+// { bg, panel, raised, line, edge, muted, ink, accent, warn } — all as hex
+styleOf(SCHEMES.find((s) => s.id === 'sepia').recipe);
+// { '--panel': '#feecd4', '--face': 'ui-serif, …', '--radius': '6px', … }
+```
+
+Nothing is fetched: the four letterings are stacks of fonts already on the
+machine. The built-in themes stay in the stylesheet, so a page with no script
+still has them, and *Match system* goes back to them.
 
 
 ## Two views, two bargains

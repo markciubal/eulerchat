@@ -26,6 +26,7 @@
 
 import { parse } from '../lib/regions.js';
 import { clusterOf } from '../lib/cluster.js';
+import { isPortalRoom } from '../lib/portal.js';
 
 const MAX_LIMIT = 500;
 
@@ -56,6 +57,9 @@ const publicMessage = (message, tally) => ({
   // Shown in the room beside the name, so it is no more private than the name.
   authorKey: message.authorKey ?? null,
   at: message.at,
+  // Written by the server, not by a person; see `server/questions.js`. Said
+  // here too, so a copy taken from the open API cannot pass for a person's.
+  machine: Boolean(message.machine),
   sealed: Boolean(message.sealed),
   // Readable only to whoever holds a key, which the server does not.
   body: message.sealed ? null : message.body,
@@ -81,6 +85,11 @@ export function createPublicApi(world, { mount = '', basePath = '/api' } = {}) {
   /** Send one event to everybody holding the firehose open. */
   const publish = (event) => {
     if (closed || !listeners.size) return;
+    // A portal is the one room this side of the product does not carry. The
+    // check is here rather than at the call site because this is the single
+    // place everything public passes through, and a second call site would
+    // eventually be added without one.
+    if (isPortalRoom(event.room)) return;
     const frame = `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
     for (const res of listeners) {
       try {
@@ -93,7 +102,7 @@ export function createPublicApi(world, { mount = '', basePath = '/api' } = {}) {
 
   const rooms = () => {
     const census = world.census();
-    return [...census.entries()].map(([key, population]) => {
+    return [...census.entries()].filter(([key]) => !isPortalRoom(key)).map(([key, population]) => {
       const subjects = parse(key);
       const log = world.messages.get(key) ?? [];
       return {
@@ -168,7 +177,11 @@ export function createPublicApi(world, { mount = '', basePath = '/api' } = {}) {
     const logMatch = rest.match(/^\/rooms\/([^/]+)\/log$/);
     if (logMatch) {
       const key = decodeURIComponent(logMatch[1]);
-      if (!world.messages.has(key) && !world.census().has(key)) {
+      // The same answer a room that does not exist gets, and deliberately the
+      // same one: a portal that denied itself in different words would be
+      // confirming, to anybody who had guessed an address, that they had
+      // guessed right.
+      if (isPortalRoom(key) || (!world.messages.has(key) && !world.census().has(key))) {
         json(res, 404, { error: 'no such room' });
         return true;
       }
@@ -179,7 +192,8 @@ export function createPublicApi(world, { mount = '', basePath = '/api' } = {}) {
     // Everything, in one pass, oldest first and resumable.
     if (rest === '/scrape') {
       const all = [];
-      for (const log of world.messages.values()) {
+      for (const [key, log] of world.messages.entries()) {
+        if (isPortalRoom(key)) continue;
         for (const message of log) if (message.at > since) all.push(message);
       }
       all.sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));

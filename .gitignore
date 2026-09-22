@@ -6,3 +6,6 @@ node_modules/
 # Stray file from a notify hook that wrote to an unexpanded path string.
 *claude-notify-signals*
 renders/
+
+# Runtime data: the durable anchor the server writes beside itself.
+*.jsonl

@@ -15,6 +15,8 @@
  * is and what was said last.
  */
 
+import { named } from '../lib/cluster.js';
+
 /**
  * Written for somebody who has never seen this before and is not going to
  * read a manual. `short` is what they get for free; `more` is there for the
@@ -22,183 +24,278 @@
  */
 export const HELP = {
   atlas: {
-    title: 'The map',
+    title: 'Map',
     short:
-      'Each shape is an interest people are here to talk about. Where two shapes overlap, ' +
-      'the part where they cross is its own conversation, for the people interested in both.',
+      'Each shape is an interest. Where shapes overlap is a conversation for people '
+      + 'in both.',
     more:
-      'Bigger shapes have more people in them, and so do bigger overlaps. Click anywhere ' +
-      'to open the conversation for that spot. Scroll to zoom in — the labels write ' +
-      'themselves out in full once there is room — drag to move around, and press ' +
-      '"back to my interests" to return.',
+      'Bigger shapes have more people. Click a spot to open its conversation. Drag to '
+      + 'move it, and scroll or pinch to zoom. In 3D, turn it with two fingers, or by '
+      + 'dragging with the right mouse button. "Reset view" under View goes back. '
+      + '"Expand" opens the map full screen.',
   },
   rooms: {
-    title: 'The conversations',
-    short: 'Every conversation on the picture above, as a button. Click one to read it.',
+    title: 'Conversations',
+    short:
+      'Every conversation on the map, as a list. Select one to open it.',
     more:
-      'The number beside each is how many people are in it. The ones in darker text are ' +
-      'ones you have joined and can post in. Hover over any of them to see how busy it ' +
-      'is and what was said last.',
+      'The number is how many people are in it. Bold ones are conversations you are '
+      + 'in. The small squares show which interests it combines. Hover to see how busy '
+      + 'it is and the last message.',
   },
   interests: {
-    title: 'Your interests',
+    title: 'Interests',
     short:
-      'What you have joined, what we think you might like, and the busiest places here. ' +
-      'Search to find anything else.',
+      'What you have joined, related interests, and popular ones. Search to find '
+      + 'anything else, or browse by category at the bottom of the list.',
     more:
-      'Joining an interest puts you in its conversation and in any conversation it shares ' +
-      'with your other interests. You can leave again at any time and nothing is lost.',
+      'Joining an interest puts you in its conversation and in any conversation it '
+      + 'shares with your other interests. You can leave any time. Click the coloured '
+      + 'square next to an interest to change its colour.',
   },
   funnel: {
-    title: 'Joining wider',
+    title: 'Also join',
     short:
-      'Interests here can be quite specific. This also puts you somewhere broader, so ' +
-      'there are more people to find.',
+      'Interests can be very specific. This also puts you somewhere broader, so there '
+      + 'are more people to find.',
     more:
-      'If you join "Roman archaeology" and somebody else joins "medieval archaeology", ' +
-      'you will never bump into each other — you have not picked the same thing. Set this ' +
-      'to "the field it is in" and you are both also in "archaeology", where you would.',
+      'If you join "Roman archaeology" and someone else joins "medieval archaeology", '
+      + 'you never meet. Set this to "Its field" and you are both also in '
+      + '"archaeology".',
   },
   minimap: {
-    title: 'Everything there is',
+    title: 'Minimap',
     short:
-      'Every interest here at once, tiny. The dark dots are yours, and the dashed box ' +
-      'shows the part of it you are in.',
+      'Every interest at once, small. Yours are the dark dots, and the dashed box '
+      + 'marks where they are.',
     more:
-      'Things near each other on this are related — all the sciences sit together, all ' +
-      'the crafts sit together. It is here so you can see how much else there is, and ' +
-      'roughly where you are among it.',
+      'Related interests sit near each other. It shows how much else there is and '
+      + 'where you are in it. Press it to explore all of them.',
+  },
+  catalogue: {
+    title: 'Add from the list',
+    short:
+      'Every interest there is, grouped under the big categories. Pick one to join it.',
+    more:
+      'Each category starts with itself, then its fields, then the interests in each '
+      + 'field, indented further the more specific they are. The number is how many '
+      + 'people are in it. Ones you have already joined are marked and cannot be '
+      + 'picked again.',
+  },
+  relief: {
+    title: 'Relief',
+    short:
+      'In 3D, each conversation stands as tall as it has been busy lately, compared '
+      + 'with the busiest on the whole site.',
+    more:
+      'Recent messages count the most: one from an hour ago counts half as much as '
+      + 'one just now. Drag with one finger to move around. Drag with two fingers to '
+      + 'turn it and tilt it and see behind tall ones, or drag with the right mouse '
+      + 'button, or with Shift. Pinch or double-tap to zoom. Or switch 3D off for the '
+      + 'flat map.',
+  },
+  explorer: {
+    title: 'All interests',
+    short:
+      'Every interest there is, laid out by subject. Bigger dots have more people. '
+      + 'Yours are outlined. Lines join interests people often hold together.',
+    more:
+      'Zoom in to see the names of fields, then of interests. Pick a dot to join it, '
+      + 'or type a name to find one. A picked dot shows its own lines and lists what '
+      + 'it is most often held with. A line needs at least two people holding both, '
+      + 'so no line ever points to one person.',
   },
   alerts: {
     title: 'Desktop alerts',
     short:
-      'Let your computer tell you when somebody says your name, or when a small ' +
-      'conversation you are in gets busy.',
+      'Get a desktop notification when someone mentions you, or when a small '
+      + 'conversation you are in gets busy.',
     more:
-      'You will not be told about every message. Busy places stay quiet and only show a ' +
-      'number; you are only interrupted for something that is actually about you.',
+      'You are not told about every message. Busy conversations only show a count.',
   },
   fit: {
-    title: 'About this picture',
+    title: 'Map accuracy',
     short:
-      'The sizes here mean something: a circle twice the size has twice the people. This ' +
-      'line says when the drawing could not quite manage that.',
+      'Sizes on the map are to scale: twice the area means twice the people. This '
+      + 'line says when the drawing could not get that exactly right.',
     more:
-      'Circles cannot always be arranged to get every size exactly right at once. When ' +
-      'that happens this says so rather than quietly showing you something wrong. It ' +
-      'does not affect anything you can do — you can ignore it.',
+      'Some combinations cannot all be drawn at exact size at once. When that happens '
+      + 'it says so here. It does not affect anything you can do.',
   },
   open: {
     title: 'This place is public',
     short:
-      'Anything you say here without locking it can be read by anyone at all, not just '
-      + 'the people in the conversation. There is an address that hands out every '
-      + 'conversation to whoever asks for it.',
+      'Anything you send unencrypted can be read by anyone, not only the people in '
+      + 'the conversation. Anyone can download every conversation.',
     more:
-      'That is on purpose: it is what lets other people build things on top of this, and '
-      + 'it is how the whole of it can be read and searched. It does mean you should treat '
-      + 'anything you type here as something you have said out loud in the street. If you '
-      + 'want a conversation that is not like that, lock it, and only the people here will '
-      + 'be able to read it.',
+      'This is deliberate: it lets people search and build on what is here. Treat '
+      + 'anything you post unencrypted as public. To keep a message to the people in '
+      + 'the conversation, tick Encrypt.',
   },
   privacy: {
-    title: 'Locking what you send',
+    title: 'Encryption',
     short:
-      'Locked messages are scrambled before they leave, with a different key each time, '
-      + 'and only the people in the conversation can unscramble them. Everything you send '
-      + 'unlocked is public.',
+      'Encrypted messages are scrambled before they leave your browser, and only '
+      + 'people in the conversation can read them. Unencrypted messages are public.',
     more:
-      'This is the only thing here that keeps anything private, so it matters more than it '
-      + 'looks. What it does not do: it does not stop the people you are talking to, who '
-      + 'can read it and can keep a copy forever, and it does not hide who you are talking '
-      + 'to or when. If a message cannot be locked it is not sent at all, rather than sent '
-      + 'in the open.',
+      'This is the only setting here that keeps anything private. It does not stop '
+      + 'the people you send it to from copying it, and it does not hide who you are '
+      + 'talking to or when. If a message cannot be encrypted, it is not sent.',
   },
   recording: {
-    title: 'Keeping your own copy',
+    title: 'Keeping a copy',
     short:
-      'Your browser keeps what is said here, so you still have it after the server '
-      + 'forgets. The server forgets everything after twelve hours.',
+      'Your browser keeps a copy of what is said here. The server deletes everything '
+      + 'after 12 hours.',
     more:
-      'This is about your copy only. Everybody else chooses for themselves, and because '
-      + 'anyone can read this place and keep what they read, a record of anything said '
-      + 'here will exist whatever you or we set. Treat anything you say as something that '
-      + 'has been kept.',
+      'This only affects your copy. Anyone can read this place and keep what they '
+      + 'read, so assume anything said here has been saved by someone.',
+  },
+  layout: {
+    title: 'Layout',
+    short:
+      'Drag the divider between the map and the conversation to resize them. "Pop '
+      + 'out" makes the map a window you can move and resize. Your browser remembers '
+      + 'the layout.',
+    more:
+      '"Swap sides" moves the map to the other side. Drag the map window to either '
+      + 'side of the screen to dock it there, or use its "Dock" buttons. "Reset" puts '
+      + 'the map back on the left. The arrow keys move the divider, and move the map '
+      + 'window from its title; with Shift they resize it.',
+  },
+  appearance: {
+    title: 'Theme',
+    short:
+      'Change how this place looks: light or dark, its colours, its lettering and '
+      + 'its corners. There are twenty themes to pick from.',
+    more:
+      'Your choice is saved in this browser and only you see it. "Match system" goes '
+      + 'back to following your device.',
+  },
+  adjust: {
+    title: 'Adjust',
+    short:
+      'Start from any theme and change it. Text stays easy to read wherever you put '
+      + 'the sliders.',
+    more:
+      'You choose the colour and how strong it is; how light or dark each part ends '
+      + 'up is worked out for you, so nothing can become too faint to read. What you '
+      + 'make is kept as "Your own".',
+  },
+  colour: {
+    title: 'Colours',
+    short:
+      'Each interest gets a colour from its name, so it stays the same. Click its '
+      + 'square to choose a different one.',
+    more:
+      'Colours you choose are saved in this browser and only you see them. Useful '
+      + 'when two interests look too similar.',
   },
   key: {
-    title: 'The letters after your name',
+    title: 'Your key',
     short:
-      'Anybody can type any name, so a name alone says nothing. The letters after it come '
-      + 'from a key that only this browser holds, and nobody can copy them by typing.',
+      'Anyone can type any name. The letters after yours come from a key only this '
+      + 'browser has, so they cannot be faked.',
     more:
-      'It is how people can tell that whoever is called this today is the same person as '
-      + 'yesterday. It is also the price: everything you say under one key can be tied '
-      + 'together by anybody, for as long as you keep it. There is no account behind it, so '
-      + 'it says you are the same person and nothing about which person. "New key" throws '
-      + 'it away. Nobody can connect you to the old one afterwards, and nothing can bring '
-      + 'the old one back, in this browser or any other.',
+      'They show you are the same person as before, and they link everything you post '
+      + 'under that key. There is no account behind it. "New key", under Settings, '
+      + 'discards it: nothing can link you to the old one afterwards, and it cannot be '
+      + 'recovered.',
   },
   deletion: {
-    title: 'What the server forgets',
+    title: 'Deleting messages',
     short:
-      'The server drops everything after twelve hours and writes down what it dropped, '
-      + 'so you can check that it did.',
+      'The server deletes messages after 12 hours and keeps a record of what it '
+      + 'deleted. Check compares that record with what you deleted and what you kept.',
     more:
-      'Each entry in that record is tied to the one before it, so the list cannot be gone '
-      + 'back over and quietly changed. If you kept your own copy of a message you can '
-      + 'check it is named there. What no record can show you is that nobody kept a copy '
-      + 'somewhere else — and here, where anyone can read along, somebody probably has.',
+      'Each entry is linked to the one before it, so the record cannot be changed later '
+      + 'without it showing. Encrypted messages are included: the record names their '
+      + 'scrambled text, so only people who received a message can recognise it. The '
+      + 'record cannot show that nobody else kept a copy.',
   },
   cluster: {
-    title: 'A small group of your own',
+    title: 'Groups',
     short:
-      'Make a group with its own name, and share the link or the square so a few people '
-      + 'can join it. Only people who have it end up in there with you.',
+      'For the people around you. Create a group and they scan the code or open the '
+      + 'link, and you are all in the same conversation.',
     more:
-      'It is a door with a name rather than a lock: anyone who has the name can walk in, '
-      + 'and anyone you share it with can share it on. Good for the six people at your '
-      + 'table, not for anything that would matter if a stranger read it. What is said '
-      + 'inside is still public unless you lock it.',
+      'Inside, everything is laid out as it is outside, with the same interests in the '
+      + 'same places, and the map draws a line round the group. Interests you join there '
+      + 'are only shared with people in it. Anyone with the name can join, and group '
+      + 'names are listed publicly, so a group is easy to find. Messages inside are '
+      + 'public unless encrypted.',
+  },
+  lurk: {
+    title: 'Lurking',
+    short:
+      'You came in by a quick-join code, so you are watching this one conversation '
+      + 'without being part of it. The people in it see how many are lurking, never '
+      + 'who, and nothing is saved on this device.',
+    more:
+      'No key is made or shown and no earlier visit is picked up, so this visit ties you '
+      + 'to nothing. Encrypted messages stay locked: they are for the people in the '
+      + 'conversation. "Join in" makes you part of it so you can talk; "Look around" '
+      + 'shows the rest of the place. Either one ends lurking, and this device '
+      + 'goes back to keeping your key and name as usual.',
+  },
+  quickjoin: {
+    title: 'Quick join',
+    short:
+      'A code for this conversation. Whoever scans it can lurk in it straight away, '
+      + 'reading along without joining anything.',
+    more:
+      'The conversation shows how many are lurking, and nothing about who. '
+      + 'That is no more than this place already allows, since unencrypted messages are '
+      + 'public. They can join in whenever they like.',
+  },
+  muting: {
+    title: 'Muting',
+    short:
+      'Muting someone folds their messages away, for you only. They are not told, and '
+      + 'nobody else is affected.',
+    more:
+      'It follows their key, so it lasts for as long as they keep it. Someone without a '
+      + 'key stays muted until you close the page. If someone uses profanity you are asked '
+      + 'whether to mute them. Nothing is muted unless you say so, and you can stop being '
+      + 'asked here.',
   },
   votes: {
-    title: 'Agreeing and disagreeing',
+    title: 'Votes',
     short:
-      'Say whether something was worth saying. Press the same one again to take it back.',
+      'Agree or disagree with a message. Press the same button again to undo.',
     more:
-      'It is not a way of reporting somebody. A message plenty of people disagree with is '
-      + 'not a message that broke a rule, and nothing here treats it as one — if it did, '
-      + 'a few friends voting together would be enough to get somebody in trouble.',
+      'Votes are not reports. Disagreement does not get anyone moderated.',
   },
   reporting: {
-    title: 'Reporting a message',
+    title: 'Reporting',
     short:
-      'Every message somebody else wrote has a small "report" next to it. Use it if '
-      + 'something said here is abusive, threatening or otherwise wrong.',
+      'Every message from someone else has a "report" link. Use it for abuse, threats '
+      + 'or other rule-breaking.',
     more:
-      'You are asked what was wrong with it, which is what tells a moderator what to look '
-      + 'for. Nobody in the conversation is told that you reported it. If a message was '
-      + 'encrypted, reporting it shows that one message to a moderator and nothing else — '
-      + 'you are asked first, because otherwise nobody could see what you are complaining '
-      + 'about.',
+      'You will be asked why. Nobody in the conversation is told who reported. For an '
+      + 'encrypted message, you are asked before its text is shown to a moderator.',
   },
   composer: {
-    title: 'Writing here',
-    short: 'Type and press post. Everyone in this conversation will see it.',
+    title: 'Posting',
+    short:
+      'Type a message and press Post. Everyone in this conversation will see it.',
     more:
-      'If the box is greyed out, you have not joined all of the interests this ' +
-      'conversation belongs to. Join them on the right and the box wakes up.',
+      'If the box is greyed out, either no conversation is open or you have not '
+      + 'joined all of its interests. The conversation panel shows what to join.',
   },
   search: {
-    title: 'Finding an interest',
-    short: 'Type a few letters to search. Press + to create one that is not here yet.',
+    title: 'Search',
+    short:
+      'Type to search interests. Press + to create one that does not exist yet.',
     more: null,
   },
   subjects: {
-    title: 'How many subjects to show',
-    short: 'More subjects means more of the place at once, and a busier picture.',
+    title: 'Subjects shown',
+    short:
+      'How many interests the map shows at once. More shows more, but is harder to '
+      + 'read.',
     more:
-      'Past five or so it gets hard to read and the shapes start to break up. Three is ' +
-      'the clearest.',
+      'Above five the map gets crowded and shapes start to split. Three is clearest.',
   },
 };
 
@@ -222,7 +319,7 @@ export function attachHelp(root, { onOpen } = {}) {
     button.type = 'button';
     button.className = 'info';
     button.textContent = 'i';
-    button.setAttribute('aria-label', `What is ${entry.title.toLowerCase()}?`);
+    button.setAttribute('aria-label', `Help: ${entry.title}`);
     button.addEventListener('click', (evt) => {
       evt.stopPropagation();
       onOpen?.(anchor.dataset.help, button);
@@ -267,7 +364,22 @@ export function createCard(doc) {
 
   let pinned = false;
 
+  // A modal dialog lifts itself above the page and leaves everything outside
+  // it underneath and inert — this card included, if it stays where it was
+  // made. So it goes into whichever one is open, and home again when none is.
+  const lift = () => {
+    let modal = null;
+    try {
+      modal = doc.querySelector('dialog:modal');
+    } catch {
+      /* a selector engine that has not heard of `:modal` has no modals either */
+    }
+    const home = modal ?? doc.body;
+    if (card.parentNode !== home) home.append(card);
+  };
+
   const place = (near) => {
+    lift();
     const box = near.getBoundingClientRect?.();
     if (!box) return;
     const width = 280;
@@ -318,14 +430,16 @@ export function createCard(doc) {
     room(room, near) {
       if (pinned) return;
       card.textContent = '';
-      card.append(heading(room.subjects.join(' and ')));
+      card.append(heading(named(room.subjects).join(' and ')));
 
       const who = doc.createElement('p');
       who.className = 'who';
       const people = `${room.population} ${room.population === 1 ? 'person' : 'people'}`;
+      // And how many are lurking in it, when anybody is: a number, never who.
+      const watching = room.lurkers ? ` · ${room.lurkers} lurking` : '';
       who.textContent = room.member
-        ? `${people} · you are in this one`
-        : `${people} · join to take part`;
+        ? `${people}${watching} · you are in this one`
+        : `${people}${watching} · join to take part`;
       card.append(who);
 
       const stats = room.stats ?? { messages: room.messages ?? 0 };
@@ -340,7 +454,10 @@ export function createCard(doc) {
         const last = doc.createElement('p');
         last.className = 'last';
         const name = doc.createElement('strong');
-        name.textContent = `${stats.last.author}: `;
+        // A system message says so here as it does in the room.
+        name.textContent = stats.last.machine
+          ? `System message, as ${stats.last.author}: `
+          : `${stats.last.author}: `;
         last.append(name, doc.createTextNode(stats.last.body));
         card.append(last);
 

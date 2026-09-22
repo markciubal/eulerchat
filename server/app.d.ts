@@ -2,7 +2,7 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { WebSocketServer } from 'ws';
 import type { Notification, NotifyPrefs, RegionKey } from '../lib/index.js';
 
-export { World, seed, type Message, type Room, type DiagramView, type AtlasView } from './store.js';
+export { World, seed, stock, type Message, type Room, type DiagramView, type AtlasView, type CatalogueLevel } from './store.js';
 
 export interface Session<Socket = unknown> {
   id: string;
@@ -153,6 +153,15 @@ export function createEulerChat(options?: {
    * Ignored when `isModerator` is given.
    */
   moderators?: Iterable<string>;
+  /**
+   * Now and then, have one of the sample people (`addUser(name, {synthetic:
+   * true})`, as `seed` and `populate` make them) ask an on-topic question in a
+   * quiet room somebody online can read. Every message is marked `machine:
+   * true`, in its hash as well as its fields, and the bundled client labels it
+   * as a system message. Never as a real person; never in a group or a portal.
+   * Off by default. `every` and `quiet` are in milliseconds.
+   */
+  questions?: boolean | { every?: number; quiet?: number };
   /**
    * Who may read reports. Nobody by default. `session.account` is what your
    * `authenticate` returned; `session.proven` and `session.keyId` are the key.

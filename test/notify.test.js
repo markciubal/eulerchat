@@ -112,6 +112,19 @@ test('muting silences a room completely', () => {
   assert.equal(classify(post({ message: { body: '@osmo' } }), muted), null);
 });
 
+test('a notification says who it is from, by key and id as well as by name', () => {
+  // A name is whatever somebody typed, so a browser that has muted a person
+  // can only recognise them by these. Nothing new is shown: the message they
+  // come from is already readable by whoever this is sent to.
+  const keyed = classify(post({ message: { authorKey: 'KEYwren1' } }), watcher());
+  assert.equal(keyed.from, 'wren');
+  assert.equal(keyed.fromId, 'wren-id');
+  assert.equal(keyed.fromKey, 'KEYwren1');
+
+  const keyless = classify(post(), watcher());
+  assert.equal(keyless.fromKey, null);
+});
+
 test('a room coming into existence is news', () => {
   const opened = classify(
     { type: 'room-opened', room: 'art+philosophy', population: 3, at: 5 },

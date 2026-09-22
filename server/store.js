@@ -13,12 +13,31 @@ import {
 } from '../lib/regions.js';
 import { layout } from '../lib/euler.js';
 import { atlas } from '../lib/atlas.js';
-import { anchorsFor, ancestorsOf, normalise, radialLayout, resolve } from '../lib/taxonomy.js';
-import { knowledge } from '../lib/knowledge.js';
+import {
+  anchorsFor,
+  ancestorsOf,
+  distanceBetween,
+  normalise,
+  radialLayout,
+  resolve,
+} from '../lib/taxonomy.js';
+import { alsoCalled, childrenOf, knowledge } from '../lib/knowledge.js';
 import { DEFAULT_WORDS, REASON_NAMES, rank, scan } from '../lib/flag.js';
 import { plain } from '../lib/plain.js';
-import { isCluster, split as splitCluster, within } from '../lib/cluster.js';
+import {
+  clusterOf,
+  groupRoom,
+  isCluster,
+  isGroupRoom,
+  label,
+  split as splitCluster,
+  within,
+} from '../lib/cluster.js';
 import { commitmentInput, entryInput } from '../lib/receipt.js';
+import { watchable } from '../lib/lurk.js';
+import { activity } from '../lib/activity.js';
+import { associations } from '../lib/association.js';
+import { isPortalRoom } from '../lib/portal.js';
 import { createHash } from 'node:crypto';
 import { MemoryLedger, isLedger } from './ledger.js';
 
@@ -31,6 +50,25 @@ const sha = (text) => createHash('sha256').update(String(text)).digest('hex');
 /** Computed once: where subjects sit before anybody has joined them. */
 const EXTENT = 1000;
 const HIERARCHY = radialLayout(knowledge, { extent: EXTENT });
+
+/**
+ * How far apart two subjects are in the hierarchy, 0 to 1. What the novelty
+ * dial steers by; built once because it memoises each subject's chain upward
+ * and a cache thrown away per call is not a cache.
+ */
+const APART = distanceBetween(knowledge);
+
+/** What sits directly under each name in the bundled hierarchy. */
+const UNDER = childrenOf(knowledge);
+
+/** How many names sit beneath one, at any depth. Memoised: browsing asks a lot. */
+const INSIDE = new Map();
+function inside(name) {
+  if (!INSIDE.has(name)) {
+    INSIDE.set(name, (UNDER.get(name) ?? []).reduce((sum, kid) => sum + 1 + inside(kid), 0));
+  }
+  return INSIDE.get(name);
+}
 
 const EMPTY = new Set();
 
@@ -85,6 +123,108 @@ export const KEEP_FOR = 12 * 60 * 60 * 1000;
  * hours. People are told this when they report.
  */
 export const REPORTS_KEEP_FOR = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * How much it says about two people that they both hold a subject.
+ *
+ * Inverse document frequency, for the same reason search uses it: a word
+ * everybody writes distinguishes nobody. Two people who both hold `art` share
+ * almost nothing; two who both hold `entomology` are nearly the same person.
+ * Held by everybody is worth exactly zero rather than a little.
+ */
+/**
+ * How many solved atlases are kept: one for each different map somebody has
+ * been shown lately. Past that the one used longest ago goes first.
+ */
+const ATLASES_KEPT = 256;
+
+const rarity = (holders, people) => Math.max(0, Math.log(people / Math.max(1, holders)));
+
+/**
+ * Region addresses without the array `key()` would allocate. Same answer —
+ * sorted and joined — but these run once per candidate per subject held, which
+ * is the one place in this file where that matters.
+ */
+const pairKey = (a, b) => (a < b ? `${a}+${b}` : `${b}+${a}`);
+const tripleKey = (a, b, c) => {
+  let x = a;
+  let y = b;
+  let z = c;
+  let t;
+  if (x > y) { t = x; x = y; y = t; }
+  if (y > z) { t = y; y = z; z = t; }
+  if (x > y) { t = x; x = y; y = t; }
+  return `${x}+${y}+${z}`;
+};
+
+/**
+ * A subject this much of the world holds is a crowd, and two people standing
+ * in a crowd have not met. Gathering candidates through one costs the most and
+ * says the least — the rarity weighting would discount whatever it found to
+ * nearly nothing anyway — so it is skipped, which is faster *and* better.
+ *
+ * The floor is there because a small world is all crowd: in a world of twenty
+ * people every subject is a large share of it, and skipping everything would
+ * leave the seeded world with no bridges at all.
+ */
+const CROWD_SHARE = 0.05;
+const CROWD_FLOOR = 64;
+
+/**
+ * The size at which a room stops being a room and starts being a crowd —
+ * the same number `lib/notify.js` calls `intimate`, and for the same reason.
+ *
+ * A room needs somebody in it, and the second person is worth far more than
+ * the first, so population counts. But it counts up to here and no further: a
+ * room of eighty is not ten times the find a room of eight is, and a weighting
+ * that said so would quietly turn back into the popularity ranking that
+ * `rail.popular` already is. Past this point what separates two suggestions is
+ * how unusual they are, which is the whole point of the exercise.
+ */
+const INTIMATE = 8;
+const INTIMATE_SCALE = Math.log1p(INTIMATE);
+
+/**
+ * How many of somebody's subjects are used as bridges: the rarest this many.
+ *
+ * Everything in this walk is multiplied by that number — the people visited,
+ * the rooms looked up per candidate, and then the triples among the rooms that
+ * matched — so an uncapped subscription of thirty-two turned a millisecond
+ * into thirty. The rarest eight are where the information is, by the same
+ * argument that orders them; the rest were going to be discounted to almost
+ * nothing anyway, and paying for a thirtieth census lookup to add a room worth
+ * 0.02 is not a trade to make on the only thread there is.
+ *
+ * Nobody is shown more than three subjects at once, and almost nobody holds
+ * more than eight, so in practice this caps nothing at all.
+ */
+const MAX_BRIDGES = 8;
+
+/**
+ * A ceiling on how many people the walk may look at. Subjects are walked
+ * rarest first, so what a truncation drops is the least informative end —
+ * and without it a world where one subject is held by everybody would make
+ * every other session on the thread wait for one person's rail.
+ */
+const DISCOVERY_BUDGET = 20_000;
+
+/**
+ * The group a subscription is in: the one whose own conversation it holds, or
+ * null for the open world. The last one joined, if somebody is somehow in two.
+ */
+function groupIn(held) {
+  let found = null;
+  for (const subject of held) if (isGroupRoom(subject)) found = clusterOf(subject);
+  return found;
+}
+
+/**
+ * Whether a subject is in the same place as a person: inside their group, or
+ * in the open world if they are in none. What is suggested, searched and
+ * browsed stays on one side of that line — a group is not shown the busiest
+ * rooms outside it, and nobody is shown another group's rooms at all.
+ */
+const scopedTo = (group) => (subject) => clusterOf(subject) === group;
 
 /** Region populations, canonically ordered — identical censuses, identical string. */
 const censusSignature = (counts) =>
@@ -166,10 +306,18 @@ export class World {
     return subject;
   }
 
-  addUser(name) {
+  /**
+   * Somebody new. `synthetic` marks one of the sample people a demo world is
+   * filled with rather than a person: they are the only ones the server will
+   * ever write a machine question as, so that nobody real — online or not — is
+   * made to seem to have asked something they did not. See `server/questions.js`.
+   */
+  addUser(name, options = {}) {
     const userId = id();
     // No census change either: they hold nothing yet.
-    this.profiles.set(userId, { id: userId, name: nameFrom(name) || 'anon' });
+    const profile = { id: userId, name: nameFrom(name) || 'anon' };
+    if (options.synthetic) profile.synthetic = true;
+    this.profiles.set(userId, profile);
     this.members.set(userId, new Set());
     return userId;
   }
@@ -192,14 +340,27 @@ export class World {
     const held = this.members.get(userId);
     if (!held || held.has(subject)) return;
 
+    // Inside a group, the group's own conversation comes first. It wraps every
+    // room in the group: everybody holding anything there holds it too, so
+    // the group's rooms are always drawn inside its outline and a message to
+    // the whole group reaches everybody in it. See `lib/cluster.js`.
+    const cluster = clusterOf(subject);
+    const wrap = cluster && !isGroupRoom(subject) ? groupRoom(cluster) : null;
+    const wrapping = wrap !== null && !held.has(wrap);
+
     // The census enumerates every subset of a subscription up to arity three,
     // so its cost is cubic in how much one person holds. Unbounded, a single
     // client holding three hundred subjects builds four and a half million
     // regions and puts every view — everyone's, not just theirs — over a
     // second. Nobody is shown more than three subjects at once, so there is no
     // legitimate reason to hold a hundred.
-    if (held.size >= MAX_SUBSCRIPTIONS) {
+    if (held.size + (wrapping ? 1 : 0) >= MAX_SUBSCRIPTIONS) {
       throw new Error(`you can hold at most ${MAX_SUBSCRIPTIONS} subjects — leave one first`);
+    }
+
+    if (wrapping) {
+      if (!this.subjects.has(wrap)) this.addSubject(wrap);
+      this.join(userId, wrap, { reach: 0 });
     }
 
     // Announce only once the membership is actually true. Emitting from inside
@@ -232,7 +393,12 @@ export class World {
     if (reach <= 0) return;
     const held = this.members.get(userId);
 
-    for (const broader of ancestorsOf(subject, knowledge, reach)) {
+    // Inside a group the widening stays inside it: `kite-fox-9/painting`
+    // widens into the group's own `visual art`, not into the open one, because
+    // the group is a copy of the whole hierarchy and not a hole in it.
+    const cluster = clusterOf(subject);
+    for (const above of ancestorsOf(label(subject), knowledge, reach)) {
+      const broader = within(cluster, above);
       if (!held || held.size >= MAX_SUBSCRIPTIONS) break;
       if (!this.subjects.has(broader)) {
         if (this.subjects.size >= MAX_SUBJECTS) break;
@@ -264,6 +430,16 @@ export class World {
     const held = this.members.get(userId);
     if (!held || !held.has(subject)) return;
 
+    // Leaving a group's own conversation is leaving the group. Everything
+    // inside it goes first, so no room of the group is ever held outside the
+    // outline that wraps it — not even for the moment between two leaves.
+    if (isGroupRoom(subject)) {
+      const cluster = clusterOf(subject);
+      for (const other of [...held]) {
+        if (other !== subject && clusterOf(other) === cluster) this.leave(userId, other);
+      }
+    }
+
     held.delete(subject);
     const holders = this._holders.get(subject);
     if (holders) {
@@ -294,6 +470,11 @@ export class World {
    * `held` must exclude `subject` — the caller adds or removes it around this.
    */
   #touch(held, subject, delta) {
+    // Every change of membership, counted, for whatever is worked out from
+    // the census and kept: the census is the same Map before and after, with
+    // the same size unless a region came or went, so neither says whether a
+    // count inside it moved.
+    this._changes = (this._changes ?? 0) + 1;
     if (!this._census) return []; // nothing built yet; the cold path will be right
     const events = [];
 
@@ -441,11 +622,18 @@ export class World {
     return solved;
   }
 
+  /** The group somebody is in, or null. See `groupIn`. */
+  groupOf(userId) {
+    return groupIn(this.subscription(userId));
+  }
+
   /** Everything a view depends on, without paying for the geometry. */
   context(userId) {
     const counts = this.census();
     const held = this.subscription(userId);
-    const { subjects, hidden, suggested } = neighbourhood(counts, held, MAX_ARITY, this.index());
+    const { subjects, hidden, suggested } = neighbourhood(counts, held, MAX_ARITY, this.index(), {
+      allowed: scopedTo(groupIn(held)),
+    });
     return { held, subjects, hidden, suggested, local: restrict(counts, subjects) };
   }
 
@@ -498,7 +686,7 @@ export class World {
       suggested,
       subscription: [...held].sort(),
       funnel: this.funnel(userId),
-      rail: this.rail(held, suggested),
+      rail: this.rail(held, suggested, { userId }),
     };
   }
 
@@ -511,17 +699,309 @@ export class World {
    * needs to hand is what they hold, what is being suggested to them, and a
    * few large rooms to fall into — anything else they can search for.
    */
-  rail(held, suggested = [], popular = 12) {
+  rail(held, suggested = [], options = {}) {
+    const { popular = 12, discover = 5, userId = null, novelty } = options;
+    const group = groupIn(held);
+    const here = scopedTo(group);
     const mine = [...held].sort();
-    const shown = new Set([...mine, ...suggested]);
+    const related = group ? this.#mirror(held, group, suggested) : suggested;
+    const shown = new Set([...mine, ...related]);
     const index = this.index();
+
+    // The group's own busiest first, then the busiest outside, as the group's
+    // copies: a group of six has no popular rooms of its own on its first day.
+    const busiest = index.popular.filter(here);
+    if (group) {
+      for (const s of index.popular) if (clusterOf(s) === null) busiest.push(within(group, s));
+    }
 
     return {
       held: mine,
-      suggested,
-      popular: index.popular.filter((s) => !shown.has(s)).slice(0, popular),
-      total: this.subjects.size,
+      suggested: related,
+      popular: [...new Set(busiest)].filter((s) => !shown.has(s)).slice(0, popular),
+      // Not filtered against the three lists above, and that is deliberate.
+      // `popular` hides what is already shown because it is a fallback — a few
+      // big rooms to fall into when nothing better is on offer. A discovery is
+      // not a fallback: it is a room with people in it that this person cannot
+      // reach today, and dropping the evidence because the same word appears
+      // further up the rail would delete the one thing worth saying about it.
+      discoveries: this.#discover(held, {
+        limit: discover,
+        novelty: this.#novelty(userId, novelty),
+        allowed: here,
+      }),
+      // The catalogue, which a group has all of: every interest outside has
+      // its copy inside, waiting for somebody in the group to open it.
+      total: this.#catalogue(),
     };
+  }
+
+  /**
+   * What the world outside would suggest, brought inside the group.
+   *
+   * A group of six is too few people for its own overlaps to say much; the
+   * outside has thousands, and art sits beside philosophy out there because a
+   * great many people hold both. So a group is offered its own suggestions
+   * first and then exactly what somebody outside holding the same interests
+   * would be offered — each as the group's copy. The structure of the world,
+   * with the group's own people in it.
+   */
+  #mirror(held, group, own) {
+    const twins = [...held].filter((s) => clusterOf(s) === group && !isGroupRoom(s)).map(label);
+    const { suggested } = neighbourhood(this.census(), twins, MAX_ARITY, this.index(), {
+      allowed: scopedTo(null),
+    });
+    const out = new Set(own);
+    for (const s of suggested) {
+      const copy = within(group, s);
+      if (!held.has(copy)) out.add(copy);
+    }
+    return [...out];
+  }
+
+  /**
+   * How many interests there are to choose from: the open catalogue, not
+   * every group's copy of it counted again. Only recounted when something has
+   * been added, since nothing is ever taken away.
+   */
+  #catalogue() {
+    if (this._catalogue?.size !== this.subjects.size) {
+      let open = 0;
+      for (const s of this.subjects) if (clusterOf(s) === null) open += 1;
+      this._catalogue = { size: this.subjects.size, open };
+    }
+    return this._catalogue.open;
+  }
+
+  /**
+   * The novelty dial for one person: 0 goes deeper into what they already
+   * hold, 1 reaches for something they got to through people but which sits
+   * far away in the hierarchy.
+   *
+   * Zero by default rather than the middle, because that is what
+   * `neighbourhood` defaults to and the two suggestion paths in one world
+   * disagreeing about the same dial would be worse than either setting. The
+   * middle belongs to `adapt`, where a missing column is a missing answer
+   * rather than somebody's choice.
+   */
+  #novelty(userId, override) {
+    const value = override ?? this.profiles.get(userId)?.novelty ?? 0;
+    return Math.max(0, Math.min(1, Number(value) || 0));
+  }
+
+  /**
+   * Subjects somebody does not hold, and the rooms joining one would open.
+   *
+   * Not "people who held what you hold also held this", which is a claim about
+   * taste that any shop can make. It is that a room exists, with people
+   * already in it, one subject away from where this person is standing: three
+   * people in `entomology+mycology`, and they hold entomology. Rooms here are
+   * derived from membership rather than enumerated, so that sentence is a fact
+   * about the world and not a guess — and it is the discovery this shape of
+   * product can make and a flat one structurally cannot.
+   *
+   * Ranked by rarity rather than by size, which is the whole difference
+   * between this and `rail.popular`. That list is ordered by how many people
+   * are in a room and is deliberately the other thing; a room of three
+   * entomologists says far more about whoever would join it than a room of
+   * four hundred people who all like art.
+   *
+   * **What it does not offer**, which matters more than what it does:
+   *
+   * - **The single-subject room.** Joining anything opens the room named after
+   *   it, so every suggestion would carry the same fact about itself and none
+   *   of them would carry any information. The rail lists subjects by size
+   *   already; what nobody finds unaided is the overlap. The exception is
+   *   somebody holding nothing at all, who has no overlaps to be one step
+   *   from — see below.
+   * - **Rooms that do not exist.** No combination is invented to be suggested.
+   *   If nobody occupies `entomology+poetry` it is not offered, however good a
+   *   pairing it sounds, because the point of the offer is that there are
+   *   people in there.
+   * - **A say in `viewSignature`.** Discoveries move on almost any membership
+   *   change anywhere near a person, and putting them in the fingerprint would
+   *   turn "redraw the few sessions whose picture moved" back into "redraw
+   *   everybody". So a rail's discoveries can be a change or two out of date
+   *   until something that person can actually see moves.
+   *
+   * @param {string} userId
+   * @param {object} [options]
+   * @param {number} [options.limit=5]    how many subjects to return
+   * @param {number} [options.rooms=3]    how many rooms to carry per subject
+   * @param {number} [options.novelty]    0 goes deeper, 1 reaches further out
+   */
+  discoveries(userId, options = {}) {
+    const held = this.subscription(userId);
+    return this.#discover(held, {
+      allowed: scopedTo(groupIn(held)),
+      ...options,
+      novelty: this.#novelty(userId, options.novelty),
+    });
+  }
+
+  /**
+   * The walk behind `discoveries`, over a subscription rather than a person,
+   * so the rail can ask for it without a second lookup.
+   *
+   * Cost is the reason this is written the way it is. It runs on every
+   * membership change, on the only thread there is, in a world of a thousand
+   * subjects and four thousand people — so there is no pass over the
+   * population anywhere in it and nothing that is quadratic in anything large:
+   *
+   * 1. Candidates come from walking `_holders` for the subjects this person
+   *    holds, rarest first and skipping the crowds. That is a few hundred
+   *    people, not four thousand, and it is the only part that touches people
+   *    at all.
+   * 2. Whether a room exists, and how many are in it, is one lookup in the
+   *    census. No set intersection is ever computed here — the census already
+   *    counted every occupied region and is kept up to date in place.
+   * 3. A triple can only be occupied if both of its pairs are, so the search
+   *    for one runs over the subjects that already matched rather than over
+   *    everything the person holds. Somebody holding thirty-two subjects has
+   *    496 pairs and almost never more than two or three that matter.
+   */
+  #discover(held, options = {}) {
+    const limit = Math.max(0, options.limit ?? 5);
+    const perSubject = Math.max(1, options.rooms ?? 3);
+    const novelty = Math.max(0, Math.min(1, options.novelty ?? 0));
+    // Which side of a group's outline this person is on; see `scopedTo`.
+    // Somebody in the open world who shares a room with a group's member is
+    // not one subject away from that group.
+    const allowed = options.allowed ?? (() => true);
+    if (!limit) return [];
+
+    const counts = this.census();
+    const { population } = this.index();
+    const people = Math.max(1, this.members.size);
+
+    const idf = (s) => rarity(population.get(s) ?? 0, people);
+    // A room is worth what it says about the people standing in it — how
+    // unusual it is to hold all of its subjects — discounted only if there is
+    // hardly anybody there. Rarity is the ranking; population is a floor under
+    // it, and it stops counting at the size where a room stops being one.
+    const worth = (specificity, n) =>
+      specificity * Math.min(1, Math.log1p(n) / INTIMATE_SCALE);
+
+    // Rarest first, so that a cap or a budget spends what it has on the
+    // subjects that say the most about whoever holds them.
+    const crowd = Math.max(CROWD_FLOOR, people * CROWD_SHARE);
+    const mine = [...held]
+      .filter((s) => population.has(s))
+      .sort((a, b) => population.get(a) - population.get(b) || a.localeCompare(b));
+    const bridges = mine.filter((s) => (this._holders.get(s)?.size ?? 0) <= crowd).slice(0, MAX_BRIDGES);
+    // Worked out once rather than once per candidate, which is the difference
+    // between a few thousand logarithms and a few dozen.
+    const bridgeIdf = bridges.map(idf);
+
+    const candidates = new Set();
+    let visits = 0;
+    for (const subject of bridges) {
+      const holders = this._holders.get(subject) ?? EMPTY;
+      if (visits >= DISCOVERY_BUDGET) break;
+      visits += holders.size;
+      for (const other of holders) {
+        for (const theirs of this.members.get(other) ?? EMPTY) {
+          if (!held.has(theirs) && allowed(theirs)) candidates.add(theirs);
+        }
+      }
+    }
+
+    const found = [];
+    const matched = [];
+    for (const subject of candidates) {
+      const rooms = [];
+      const self = idf(subject);
+      // Which bridges this candidate already shares a room with. There is
+      // always at least one, since it was reached through somebody standing in
+      // both — and a triple can only be occupied if both of its pairs are, so
+      // this is also the only place a triple can be hiding.
+      matched.length = 0;
+      for (let i = 0; i < bridges.length; i++) {
+        const k = pairKey(bridges[i], subject);
+        const n = counts.get(k);
+        if (n === undefined) continue;
+        matched.push(i);
+        rooms.push({ key: k, population: n, weight: worth(self + bridgeIdf[i], n) });
+      }
+      for (let i = 0; i < matched.length; i++) {
+        for (let j = i + 1; j < matched.length; j++) {
+          const a = matched[i];
+          const b = matched[j];
+          const k = tripleKey(bridges[a], bridges[b], subject);
+          const n = counts.get(k);
+          if (n === undefined) continue;
+          rooms.push({ key: k, population: n, weight: worth(self + bridgeIdf[a] + bridgeIdf[b], n) });
+        }
+      }
+      if (rooms.length) found.push(this.#discovery(subject, rooms, population));
+    }
+
+    // Somebody holding nothing — everybody, once — is not one subject away
+    // from any overlap, because there is no bridge for them to be standing on.
+    // Neither is somebody whose every subject is held by nobody else. The only
+    // honest evidence left is the room a subject is on its own, so that is
+    // what is offered rather than an empty list or an invented pairing.
+    //
+    // Ranked with the population uncapped, which the rooms above deliberately
+    // are not, because it is not the same question. Which room a step away is
+    // worth the step is a question about how unusual it is; where to stand in
+    // the first place is a question about where there is anybody to talk to.
+    // Rarity still pulls against size, so what comes out is the middle —
+    // subjects with enough people to have a conversation in and few enough to
+    // be about something — rather than `rail.popular` a second time. Capped,
+    // it would be a hundred subjects tied at eight people each and an answer
+    // settled by the alphabet.
+    if (!found.length) {
+      for (const [subject, n] of population) {
+        if (held.has(subject) || !allowed(subject)) continue;
+        const room = { key: subject, population: n, weight: idf(subject) * Math.log1p(n) };
+        found.push(this.#discovery(subject, [room], population));
+      }
+    }
+
+    let strongest = 0;
+    for (const entry of found) strongest = Math.max(strongest, entry.score);
+
+    for (const entry of found) {
+      // Scored against the strongest rather than in absolute terms, so that
+      // novelty trades against it on the same scale whatever the size of the
+      // world — the same bargain `neighbourhood` strikes, and the same sense:
+      // 0 is the strongest overlap, 1 is somewhere reached through people but
+      // a long way off in the hierarchy.
+      const near = strongest > 0 ? entry.score / strongest : 0;
+      let far = 0;
+      if (novelty > 0 && mine.length) {
+        for (const s of mine) far += APART(entry.subject, s);
+        far = Math.min(1, far / mine.length);
+      }
+      // Rounded before it is sorted on, so that two genuinely equal scores are
+      // equal numbers and the tie goes to the name rather than to whichever
+      // way the last floating-point bit fell.
+      entry.score = Math.round(((1 - novelty) * near + novelty * far) * 1000) / 1000;
+    }
+
+    found.sort((a, b) => b.score - a.score || a.subject.localeCompare(b.subject));
+    return found.slice(0, limit).map((entry) => ({
+      subject: entry.subject,
+      population: entry.population,
+      // Small enough to ride in a frame sent on every membership change: a
+      // handful of subjects, a handful of rooms each, and nothing in any of
+      // them that is not a string or a number.
+      rooms: entry.rooms.slice(0, perSubject).map((room) => ({
+        key: room.key,
+        population: room.population,
+      })),
+      opens: entry.rooms.length,
+      score: entry.score,
+    }));
+  }
+
+  /** One candidate, with its rooms strongest first and their weights summed. */
+  #discovery(subject, rooms, population) {
+    rooms.sort((a, b) => b.weight - a.weight || a.key.localeCompare(b.key));
+    let score = 0;
+    for (const room of rooms) score += room.weight;
+    return { subject, population: population.get(subject) ?? 0, rooms, score };
   }
 
   /**
@@ -537,7 +1017,7 @@ export class World {
     return {
       subscription: [...held].sort(),
       funnel: this.funnel(userId),
-      rail: this.rail(held, suggested),
+      rail: this.rail(held, suggested, { userId }),
     };
   }
 
@@ -555,29 +1035,73 @@ export class World {
   atlasFor(userId, limit = 5) {
     const counts = this.census();
     const held = this.subscription(userId);
-    const { subjects } = neighbourhood(counts, held, limit, this.index());
+    const { subjects } = neighbourhood(counts, held, limit, this.index(), {
+      allowed: scopedTo(groupIn(held)),
+    });
     // Anchored to the knowledge hierarchy, so the map keeps its shape as people
     // come and go instead of rearranging itself around whoever is here now.
-    const view = atlas(zones([...this.members.values()], subjects), {
-      anchors: anchorsFor(subjects, this.hierarchy ?? HIERARCHY),
-    });
+    // Inside a group each subject is anchored where its outside twin is, so
+    // the group is drawn as the same map with its own people on it.
+    const group = groupIn(held);
+    const regions = zones([...this.members.values()], subjects);
 
-    return {
-      ...view,
-      subscription: [...held].sort(),
-      rooms: view.zones.map((zone) => ({
-        key: zone.key,
-        subjects: zone.subjects,
-        // Both numbers matter and they differ: the ground a zone occupies is
-        // the people holding exactly it, while the room it opens reaches
-        // everyone holding at least it.
-        here: zone.population,
-        population: counts.get(zone.key) ?? zone.population,
-        member: receives(held, zone.subjects),
-        messages: (this.messages.get(zone.key) ?? []).length,
-        stats: this.stats(zone.key),
-      })),
-    };
+    // The drawing is a function of nothing but which subjects are in it, how
+    // many hold each region of them, and the group round them, so it is
+    // solved once for those and kept. Every open page asks again every ten
+    // seconds for how busy the rooms are, and solving each time was a tenth
+    // to a fifth of a second, per page, of the only thread there is. `shape`
+    // names the drawing, so a page that has it already need not be sent it.
+    const key = JSON.stringify([subjects, [...regions].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)), group]);
+    this._atlases ??= new Map();
+    let solved = this._atlases.get(key);
+    if (solved) {
+      // Most recently used last, so the oldest is the first to go.
+      this._atlases.delete(key);
+    } else {
+      solved = {
+        view: atlas(regions, {
+          anchors: anchorsFor(subjects, this.hierarchy ?? HIERARCHY),
+          // The group's own conversation wraps its rooms: drawn round them,
+          // and left out of where they go, so they are laid out as they are
+          // outside.
+          frames: group ? [groupRoom(group)] : [],
+        }),
+        shape: createHash('sha1').update(key).digest('hex').slice(0, 16),
+      };
+    }
+    this._atlases.set(key, solved);
+    if (this._atlases.size > ATLASES_KEPT) this._atlases.delete(this._atlases.keys().next().value);
+    const { view, shape } = solved;
+
+    const room = (key, subjects, here) => ({
+      key,
+      subjects,
+      // Both numbers matter and they differ: the ground a zone occupies is
+      // the people holding exactly it, while the room it opens reaches
+      // everyone holding at least it.
+      here,
+      population: counts.get(key) ?? here,
+      member: receives(held, subjects),
+      messages: (this.messages.get(key) ?? []).length,
+      stats: this.stats(key),
+      // How high the map raises it: how lively it has been lately, against
+      // the liveliest room on the platform; see `activity`.
+      activity: lively.rooms.get(key) ?? 0,
+    });
+    const lively = this.activity();
+    const rooms = view.zones.map((zone) => room(zone.key, zone.subjects, zone.population));
+
+    // The group's own conversation, whether or not it has ground of its own.
+    // It wraps the group, so as soon as everybody in it holds something else
+    // too, nobody holds it alone and it has no patch of the map to be opened
+    // from — and the one room the whole group can talk in would vanish from
+    // the list of rooms exactly when the group got going.
+    const own = group ? groupRoom(group) : null;
+    if (own && !rooms.some((r) => r.key === own)) rooms.push(room(own, [own], 0));
+
+    // How busy each room is, and whether they are in it, afresh every time:
+    // those are what change between one ask and the next.
+    return { ...view, shape, subscription: [...held].sort(), rooms };
   }
 
   /**
@@ -596,19 +1120,34 @@ export class World {
    */
   overview() {
     const counts = this.census();
-    if (this._overview?.census === counts && this._overview.size === counts.size) {
+    if (this._overview?.census === counts && this._overview.changes === this._changes) {
       return this._overview.value;
     }
 
-    const where = this.hierarchy ?? HIERARCHY;
     const { population } = this.index();
+    // The open world only. A group's rooms are copies of the ones outside,
+    // sitting on exactly the same spots, and are nobody else's business.
+    const placed = this.#place([...population].filter(([id]) => clusterOf(id) === null));
+    const value = { subjects: placed, extent: EXTENT, classified: placed.filter((s) => s.known).length };
+    this._overview = { census: counts, changes: this._changes, value };
+    return value;
+  }
+
+  /**
+   * Subjects at their places in the hierarchy, and the ones it has never heard
+   * of round an outer ring rather than dropped.
+   *
+   * @param {Array<[string, number]>} entries  subject and how many hold it
+   */
+  #place(entries) {
+    const where = this.hierarchy ?? HIERARCHY;
     // Fanned, so the facets of one subject are distinguishable rather than
     // stacked invisibly on top of it.
-    const anchors = anchorsFor(population.keys(), where);
+    const anchors = anchorsFor(entries.map(([id]) => id), where);
     const placed = [];
     const strays = [];
 
-    for (const [id, n] of population) {
+    for (const [id, n] of entries) {
       const at = anchors.get(id);
       if (at) placed.push({ id, n, x: Math.round(at.x), y: Math.round(at.y), known: true });
       else strays.push({ id, n });
@@ -627,10 +1166,145 @@ export class World {
         known: false,
       });
     });
+    return placed;
+  }
 
-    const value = { subjects: placed, extent: EXTENT, classified: placed.length - strays.length };
-    this._overview = { census: counts, size: counts.size, value };
+  /**
+   * The whole catalogue on one sheet, for finding a way round it.
+   *
+   * The overview is what the minimap draws: every subject somebody holds, to
+   * say where the people are. This is for somebody looking for what to join,
+   * so it is every interest there is, held or not, with the names of the
+   * divisions and fields written over the patches of the map they cover — the
+   * same catalogue the interests list walks a level at a time, laid out flat.
+   *
+   * Only the open world, as everywhere a catalogue is shown: a group's copies
+   * sit exactly where the originals do and are the group's business. Cached
+   * against the census, so it is worked out once per change of membership and
+   * only when somebody asks.
+   */
+  chart() {
+    const counts = this.census();
+    if (
+      !(
+        this._chartBase?.census === counts &&
+        this._chartBase.changes === this._changes &&
+        this._chartBase.subjects === this.subjects.size
+      )
+    ) {
+      this._chartBase = { census: counts, changes: this._changes, subjects: this.subjects.size, value: this.#chartBase(counts) };
+      this._chart = null;
+    }
+    if (this._chart && this._chart.said === this._said) return this._chart.value;
+
+    // How lively each has been lately, against the liveliest; the height the
+    // explorer raises it to. Left off where it is nought, which is most. Put
+    // on the sheet afresh after every message, which is all a message changes.
+    const base = this._chartBase.value;
+    const lively = this.activity().subjects;
+    const value = {
+      ...base,
+      subjects: base.subjects.map((s) => {
+        const a = lively.get(s.id);
+        return a ? { ...s, a } : s;
+      }),
+    };
+    this._chart = { said: this._said, value };
     return value;
+  }
+
+  /**
+   * The chart without how lively anything is: where every interest goes, how
+   * many hold it, what it is under, the names over the patches and the links.
+   * Worked out again only when who holds what changes. `shape` names it, so a
+   * page that has this one already is sent only how lively each is.
+   */
+  #chartBase(counts) {
+    const { population } = this.index();
+    const open = [...this.subjects].filter((s) => clusterOf(s) === null);
+    const placed = this.#place(open.map((id) => [id, population.get(id) ?? 0]));
+
+    // Where each division and field is: the middle of everything under it,
+    // which is where its name reads as the name of that patch.
+    const sums = new Map();
+    for (const subject of placed) {
+      subject.up = [];
+      for (let at = knowledge[subject.id]; at && at in knowledge; at = knowledge[at]) {
+        subject.up.push(at);
+        const sum = sums.get(at) ?? { x: 0, y: 0, count: 0 };
+        sum.x += subject.x;
+        sum.y += subject.y;
+        sum.count += 1;
+        sums.set(at, sum);
+      }
+    }
+    const depthOf = (name) => {
+      let depth = 0;
+      for (let at = name; at && at in knowledge; at = knowledge[at]) depth += 1;
+      return depth;
+    };
+    const labels = [];
+    for (const [name, { x, y, count }] of sums) {
+      const depth = depthOf(name);
+      if (depth !== 1 && depth !== 2) continue;
+      labels.push({ name, x: Math.round(x / count), y: Math.round(y / count), depth, count });
+    }
+
+    // Which of them people hold together; see `lib/association.js`. The open
+    // world only, as for everything else on the sheet.
+    const links = associations(counts, { open: (s) => clusterOf(s) === null });
+
+    const shape = createHash('sha1').update(JSON.stringify([placed, labels, links, EXTENT])).digest('hex').slice(0, 16);
+    return { subjects: placed, labels, links, extent: EXTENT, shape };
+  }
+
+  /**
+   * How lively each room and each interest has been lately, from 0 to 1
+   * against the liveliest on the platform: what the map and the explorer
+   * raise things by. See `lib/activity.js` for what counts and why.
+   *
+   * Worked out again only when a message comes or goes. Every message ages
+   * at the same rate, so between those the answer does not change.
+   */
+  activity() {
+    if (this._activity && this._activity.said === this._said) return this._activity.value;
+    const value = activity(this.messages, {
+      skip: isPortalRoom,
+      open: (subject) => clusterOf(subject) === null,
+    });
+    this._activity = { said: this._said, value };
+    return value;
+  }
+
+  /** Something was said or unsaid: what depends on the messages is stale. */
+  #said() {
+    this._said = (this._said ?? 0) + 1;
+  }
+
+  /**
+   * One room as somebody outside it sees it: a lurker, come in by a quick-join
+   * code (see `lib/lurk.js`). What is said in it, how many are in it, and how
+   * busy it is — everything the open read API would hand anybody anyway, since
+   * this place is public — and nothing about who is watching, because nothing
+   * here records that they are.
+   *
+   * Null for anything that could not be a room, and for a portal: those are
+   * not found, and a quick-join code is a way of finding.
+   */
+  look(roomKey) {
+    const room = watchable(roomKey);
+    if (!room) return null;
+    const subjects = parse(room);
+    return {
+      room,
+      subjects,
+      // Whether there is anything there yet. A code can outlive the room it
+      // was made for, or be made for one nobody has opened.
+      here: subjects.every((s) => this.subjects.has(s)),
+      population: this.census().get(room) ?? 0,
+      stats: this.stats(room),
+      messages: [...(this.messages.get(room) ?? [])],
+    };
   }
 
   /**
@@ -656,7 +1330,13 @@ export class World {
     return {
       messages: log.length,
       perMinute: Number((recent / (window / 60_000)).toFixed(2)),
-      last: { author: latest.author, body: latest.body.slice(0, 120), at: latest.at },
+      last: {
+        author: latest.author,
+        body: latest.body.slice(0, 120),
+        at: latest.at,
+        // So the card that shows it can say a machine wrote it.
+        ...(latest.machine ? { machine: true } : {}),
+      },
     };
   }
 
@@ -666,17 +1346,113 @@ export class World {
    * Over the whole catalogue rather than the census, so an interest that has
    * emptied out can still be found and revived — it is absent from the map,
    * not from the world.
+   *
+   * A word that is another name for something here finds that thing, and
+   * finds it first: `soccer` is `football`, and somebody who is shown nothing
+   * for it makes an empty room called `soccer` next door to the full one.
    */
-  searchSubjects(query, limit = 20) {
-    const needle = String(query ?? '').trim().toLowerCase();
+  searchSubjects(query, limit = 20, options = {}) {
+    const needle = String(query ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
     if (!needle) return [];
     const { population } = this.index();
+    const group = options.group ?? null;
 
-    return [...this.subjects]
-      .filter((s) => s.includes(needle))
-      .sort((a, b) => (population.get(b) ?? 0) - (population.get(a) ?? 0) || a.localeCompare(b))
+    // The exact word outranks everything. A word only begun finds it too, but
+    // from three letters: `ar` is augmented reality and also most of `art`.
+    const meant = new Set();
+    const named = alsoCalled[needle];
+    if (named && this.subjects.has(named)) meant.add(named);
+    const begun = new Set();
+    if (needle.length >= 3) {
+      for (const [word, subject] of Object.entries(alsoCalled)) {
+        if (word.startsWith(needle) && this.subjects.has(subject)) begun.add(subject);
+      }
+    }
+
+    // The open catalogue is what is searched, in a group as out of it: a group
+    // has a copy of every interest, and somebody else's group has nothing to
+    // do with either. Inside a group each match comes back as the group's
+    // copy, counted by the group's own people, along with anything the group
+    // made up that the outside has no word for.
+    const names = new Set();
+    for (const s of this.subjects) {
+      const cluster = clusterOf(s);
+      if (cluster !== null && cluster !== group) continue;
+      const name = label(s);
+      if (name.includes(needle) || meant.has(name) || begun.has(name)) names.add(name);
+    }
+
+    const here = (name) => population.get(within(group, name)) ?? 0;
+    const outside = (name) => population.get(name) ?? 0;
+    const rank = (s) => (meant.has(s) ? 0 : s === needle ? 1 : 2);
+    return [...names]
+      .sort(
+        (a, b) =>
+          rank(a) - rank(b) ||
+          here(b) - here(a) ||
+          outside(b) - outside(a) ||
+          a.localeCompare(b),
+      )
       .slice(0, limit)
-      .map((id) => ({ id, population: population.get(id) ?? 0 }));
+      .map((name) => ({ id: within(group, name), population: here(name) }));
+  }
+
+  /**
+   * One level of the catalogue: what sits directly under a category.
+   *
+   * Search finds a thing somebody can already name. This is for everybody
+   * else — the person who arrives with no word in mind and wants to see what
+   * there is. A thousand names is not a list anybody reads, so it is walked a
+   * level at a time: the dozen broad divisions, the fields in one of them,
+   * the interests in one of those.
+   *
+   * Only what this world actually has. The hierarchy says where things sit;
+   * the catalogue says what exists, and a host that stocked its own short
+   * list is shown that list, arranged, rather than a thousand rooms it never
+   * asked for.
+   *
+   * Inside a group it is the same tree, because a group is a copy of all of
+   * it: every row is the group's copy of that interest, with the group's own
+   * head count, and joining one opens it for the group.
+   *
+   * @param {string|null} [at]  a category, or nothing for the top
+   * @param {{group?: string|null}} [options]  the group being browsed from
+   */
+  browse(at = null, options = {}) {
+    const group = options.group ?? null;
+    const wanted = at === null || at === undefined ? '' : label(String(at).trim().toLowerCase());
+    const here = wanted && wanted in knowledge ? wanted : null;
+    const { population } = this.index();
+    const count = (name) => population.get(within(group, name)) ?? 0;
+
+    // The way back up, broadest first, without the root nobody can join.
+    const path = [];
+    for (let up = here; up && up in knowledge; up = knowledge[up]) path.unshift(up);
+
+    const children = (UNDER.get(here ?? 'knowledge') ?? [])
+      .filter((name) => this.subjects.has(name))
+      .map((name) => {
+        const beneath = (UNDER.get(name) ?? []).filter((kid) => this.subjects.has(kid));
+        // A few of what is in it, so a category says what it is for before it
+        // is opened: `sport` is a word, `team sports, motorsport` is a reason.
+        // The busiest first and then the biggest, since the first three in
+        // the alphabet are nobody's idea of what a category is about.
+        const telling = [...beneath].sort(
+          (a, b) =>
+            count(b) - count(a) ||
+            (population.get(b) ?? 0) - (population.get(a) ?? 0) ||
+            inside(b) - inside(a) ||
+            a.localeCompare(b),
+        );
+        return {
+          id: within(group, name),
+          population: count(name),
+          inside: beneath.length ? inside(name) : 0,
+          sample: telling.slice(0, 3),
+        };
+      });
+
+    return { at: here, path, children };
   }
 
   // --- messages ----------------------------------------------------------
@@ -703,6 +1479,7 @@ export class World {
       dropped += log.length - keep.length;
       if (keep.length) this.messages.set(roomKey, keep);
       else this.messages.delete(roomKey);
+      this.#said();
     }
 
     if (gone.length) this.#receipt(gone, 'expired');
@@ -841,6 +1618,7 @@ export class World {
       log.push(message);
       log.sort((a, b) => a.at - b.at || (a.seq ?? 0) - (b.seq ?? 0));
       this.messages.set(message.room, log);
+      this.#said();
       restored += 1;
     }
 
@@ -887,6 +1665,9 @@ export class World {
     if (raw.v === 2) {
       message.v = 2;
       if (raw.authorKey) message.authorKey = String(raw.authorKey);
+      // Also a claim, also in the hash: a machine question handed back without
+      // its label, or a person's words handed back with one, does not match.
+      if (raw.machine) message.machine = true;
     }
     return message;
   }
@@ -921,6 +1702,7 @@ export class World {
     const log = this.messages.get(found.roomKey).filter((m) => m.id !== messageId);
     if (log.length) this.messages.set(found.roomKey, log);
     else this.messages.delete(found.roomKey);
+    this.#said();
     this.votes.delete(messageId);
 
     return this.#receipt([found.message], 'asked');
@@ -1202,6 +1984,11 @@ export class World {
     // otherwise, so that "no key" is one thing to test for and not two.
     if (options.authorKey) message.authorKey = String(options.authorKey);
 
+    // Written by the server, not by a person: see `server/questions.js`. Set
+    // only by whoever calls this directly — nothing a connection sends can
+    // reach it — and part of the message's hash, so it cannot be taken off.
+    if (options.machine) message.machine = true;
+
     // Replying to something. Held as an id plus enough of the original to
     // show, because the thing being replied to may be deleted before this is
     // read - and a reply to nothing is a conversation with a hole in it.
@@ -1232,6 +2019,7 @@ export class World {
     log.push(message);
     if (log.length > 500) log.shift();
     this.messages.set(roomKey, log);
+    this.#said();
 
     // If an operator asked for it, note that the words are worth a look. Only
     // ever a count, and only for messages the server can actually read: a
@@ -1329,12 +2117,34 @@ export class World {
  * cannot be walked into. That absence is the whole point of the Euler path —
  * the room does not exist rather than existing and being empty.
  */
+/**
+ * Put the whole bundled catalogue into a world: every name in
+ * `lib/knowledge.js`, a little over eleven hundred of them, from the broad
+ * divisions down to `narrowboats`.
+ *
+ * Interests only. Nobody is added and nothing is said, so this is the right
+ * start for a real deployment: an interest with nobody in it costs a string
+ * in a set, takes up no room on the map, and is there to be found when the
+ * first person who wants it turns up. Three interests was enough to show how
+ * the place works and not enough to give anybody a reason to stay.
+ */
+export function stock(world) {
+  for (const name of Object.keys(knowledge)) world.addSubject(name);
+  return world;
+}
+
+/**
+ * The world a fresh install opens with: the whole catalogue, and a few
+ * made-up people talking in three corners of it so the map has something on
+ * it and the rooms show what a conversation looks like.
+ */
 export function seed(world) {
+  stock(world);
   for (const s of ['art', 'philosophy', 'music']) world.addSubject(s);
 
   const populate = (count, subjects, prefix) => {
     for (let i = 0; i < count; i++) {
-      const userId = world.addUser(`${prefix}-${i + 1}`);
+      const userId = world.addUser(`${prefix}-${i + 1}`, { synthetic: true });
       for (const s of subjects) world.join(userId, s);
     }
   };
@@ -1347,10 +2157,12 @@ export function seed(world) {
 
   const speakers = new Map();
   const say = (subjects, name, body) => {
-    if (!speakers.has(name)) speakers.set(name, world.addUser(name));
+    if (!speakers.has(name)) speakers.set(name, world.addUser(name, { synthetic: true }));
     const author = speakers.get(name);
     for (const s of subjects) world.join(author, s);
-    world.post(author, subjects, body);
+    // Written here, not by anybody, and labelled so: a system message. The
+    // names are sample people's; nobody said these.
+    world.post(author, subjects, body, { machine: true });
   };
 
   say(['art'], 'hila', 'started a large underpainting today, mostly raw umber.');

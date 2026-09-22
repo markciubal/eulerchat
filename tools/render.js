@@ -49,6 +49,8 @@ const STYLES = {
     'stroke-linejoin': 'round',
   },
   'zone-label': {},
+  // Emblems and patterns are drawn in `currentColor`; see `rasterise`.
+  texture: { opacity: 0.3 },
   'atlas-label mine': {
     'font-size': 20,
     'font-weight': 700,
@@ -94,6 +96,7 @@ function applyStyles(svg) {
 
 function rasterise(svg, file, label) {
   applyStyles(svg);
+  svg.setAttribute('color', INK);
   svg.setAttribute('width', SIZE);
   svg.setAttribute('height', SIZE);
   svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');

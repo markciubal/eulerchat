@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { World, seed } from './store.js';
+import { World, seed, stock } from './store.js';
 import { populate } from './populate.js';
 import { Sessions } from './sessions.js';
 import { Notifications } from './notifications.js';
@@ -28,13 +28,17 @@ import { parse } from '../lib/regions.js';
 import { fingerprint } from '../lib/seal.js';
 import { challenge } from '../lib/proof.js';
 import { createPublicApi } from './public-api.js';
+import { startQuestions } from './questions.js';
+import { ask } from '../lib/questions.js';
+import { isGroupRoom, named } from '../lib/cluster.js';
+import { isPortal } from '../lib/portal.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(here, '..', 'public');
 const libDir = path.join(here, '..', 'lib');
 const projectRoot = path.join(here, '..');
 
-export { World, seed, populate, Sessions, Notifications };
+export { World, seed, stock, populate, Sessions, Notifications };
 
 /**
  * @param {object} [options]
@@ -44,6 +48,10 @@ export { World, seed, populate, Sessions, Notifications };
  * @param {Iterable<string>} [options.moderators]  key fingerprints that may read reports
  * @param {(req: http.IncomingMessage) => object | null | Promise<object | null>} [options.authenticate]
  *   who the host says a connection is; anonymous when omitted
+ * @param {boolean | {every?: number, quiet?: number}} [options.questions]
+ *   now and then, have the sample people ask an on-topic question in a quiet
+ *   room, labelled as a system message; off unless asked for. See
+ *   `server/questions.js`.
  * @returns {{world: World, server: http.Server, wss: WebSocketServer, close: () => void}}
  */
 export function createEulerChat(options = {}) {
@@ -205,16 +213,32 @@ export function createEulerChat(options = {}) {
     // returned without answering and without having answered — so any listener
     // after it, including a host's catch-all 404, replied first and the file
     // arrived to a response already sent. Deciding and answering in the same
-    // tick is what makes the ordering mean anything. These are a handful of
-    // small files and they are cached after the first read.
-    let body = cache.get(file);
-    if (body === undefined) {
-      try {
-        body = fs.readFileSync(file);
-      } catch {
-        body = null;
+    // tick is what makes the ordering mean anything.
+    //
+    // Cached, and checked against the disk on every request. Cached forever,
+    // a file edited under a running server was never served again until it
+    // restarted — a stylesheet changed and the page kept the old one, which
+    // looks exactly like the change not working. A stat is one system call;
+    // the read only happens when the file has actually moved.
+    let body = null;
+    let stat = null;
+    try {
+      stat = fs.statSync(file);
+    } catch {
+      /* not there: a 404 below */
+    }
+    if (stat?.isFile()) {
+      const known = cache.get(file);
+      if (known && known.mtimeMs === stat.mtimeMs && known.size === stat.size) {
+        body = known.body;
+      } else {
+        try {
+          body = fs.readFileSync(file);
+          cache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, body });
+        } catch {
+          cache.delete(file);
+        }
       }
-      cache.set(file, body);
     }
 
     if (body === null) {
@@ -320,6 +344,73 @@ export function createEulerChat(options = {}) {
   }, SWEEP_MS);
   sweeper.unref?.();
   wss.on('close', () => clearInterval(sweeper));
+
+  /** Hand a new message to everybody connected who can read its room. */
+  const deliver = (message) => {
+    // Only people with a connection open can be sent anything, so the
+    // audience search is narrowed to them rather than to every member.
+    const audience = world.audienceFor(message.subjects, sessions.present());
+    const reached = new Set(sessions.reaching(audience));
+    for (const listener of reached) send(listener.socket, { type: 'message', message });
+    // And whoever is watching this one room without being in it: a lurker, come
+    // in by a quick-join code. Only that room — not the rooms inside it, which
+    // a member would also hear — because a lurker is watching a conversation,
+    // not holding its subjects.
+    if (!lurkers.has(message.room)) return;
+    for (const session of sessions) {
+      if (session.watching === message.room && !reached.has(session)) {
+        send(session.socket, { type: 'message', message });
+      }
+    }
+  };
+
+  /**
+   * How many lurkers are watching each room: a number, and never who.
+   *
+   * Kept here, with the connections, and not in the world: watching is a
+   * connection's business and ends with it, and the world's census is of
+   * members. The people in a room are told how many are watching it, since
+   * somebody talking deserves to know how big the audience is — but nothing
+   * about any one of them, so a lurker is seen as one of a number and not as
+   * anybody.
+   */
+  const lurkers = new Map();
+
+  /** Tell everybody who can read a room, and whoever is watching it, how many are. */
+  const tellLurkers = (room) => {
+    const count = lurkers.get(room) ?? 0;
+    const told = new Set(sessions.reaching(world.audienceFor(parse(room), sessions.present())));
+    for (const session of sessions) if (session.watching === room) told.add(session);
+    for (const listener of told) send(listener.socket, { type: 'lurkers', room, count });
+  };
+
+  /** Start or stop one connection watching a room, keeping the count. */
+  const watchRoom = (session, room) => {
+    const was = session.watching ?? null;
+    if (was === room) return;
+    if (was) {
+      const left = (lurkers.get(was) ?? 1) - 1;
+      if (left > 0) lurkers.set(was, left);
+      else lurkers.delete(was);
+    }
+    session.watching = room;
+    if (room) lurkers.set(room, (lurkers.get(room) ?? 0) + 1);
+    if (was) tellLurkers(was);
+    if (room) tellLurkers(room);
+  };
+
+  // Questions written by the server, labelled as such, if the host asked for
+  // them: a sample world that says something now and then. Off by default,
+  // and inert in a world with no sample people in it. See `server/questions.js`.
+  const asking = options.questions
+    ? startQuestions({
+        world,
+        present: () => sessions.present(),
+        deliver,
+        ...(typeof options.questions === 'object' ? options.questions : {}),
+      })
+    : null;
+  wss.on('close', () => asking?.stop());
 
   /**
    * Platform routers close a connection that carries no data for a while —
@@ -548,7 +639,7 @@ export function createEulerChat(options = {}) {
       bucket.tokens -= cost;
       return true;
     };
-    const PRICE = { createSubject: 10, atlas: 8, overview: 6, post: 2, search: 1, join: 1, leave: 1, funnel: 2, keys: 3, proof: 3, readers: 2, record: 1, report: 4, concerns: 3, concern: 2, clear: 2, vote: 1, forget: 2, restore: 6 };
+    const PRICE = { createSubject: 10, atlas: 8, overview: 6, post: 2, search: 1, browse: 1, join: 1, leave: 1, funnel: 2, keys: 3, proof: 3, readers: 2, record: 1, report: 4, concerns: 3, concern: 2, clear: 2, vote: 1, forget: 2, receipts: 4, restore: 6, watch: 2, unwatch: 1, chart: 6, poke: 3 };
 
     const hear = (raw) => {
       let msg;
@@ -595,6 +686,26 @@ export function createEulerChat(options = {}) {
           case 'leave': {
             world.leave(userId, String(msg.subject));
             pushDiagrams();
+            break;
+          }
+
+          case 'watch': {
+            // Watching one room without being in it: a lurker, come in by a
+            // quick-join code; see `lib/lurk.js`. Nothing joins, nothing is
+            // counted, and the connection is only remembered as watching for
+            // as long as it is open.
+            const view = world.look(msg.room);
+            if (!view) {
+              send(socket, { type: 'error', message: 'there is no conversation to watch there' });
+              break;
+            }
+            watchRoom(session, view.room);
+            send(socket, { type: 'watching', ...view, lurkers: lurkers.get(view.room) ?? 0 });
+            break;
+          }
+
+          case 'unwatch': {
+            watchRoom(session, null);
             break;
           }
 
@@ -663,6 +774,22 @@ export function createEulerChat(options = {}) {
               send(listener.socket, { type: 'forgotten', messageId: String(msg.messageId ?? '') });
             }
             send(socket, { type: 'receipt', receipt });
+            break;
+          }
+
+          case 'receipts': {
+            // The whole deletion record, so a browser can check it against the
+            // copies it kept. Over the socket as well as the open read API,
+            // because a host that leaves that API off still owes the people
+            // in its rooms a way to see what was deleted. It carries hashes
+            // only, which nobody can turn back into a message; only somebody
+            // already holding a message can recognise it in here — and for an
+            // encrypted one, only the people it was sent to.
+            send(socket, {
+              type: 'receipts',
+              receipts: world.receipts(),
+              head: world.deletions.at(-1)?.hash ?? '',
+            });
             break;
           }
 
@@ -739,6 +866,57 @@ export function createEulerChat(options = {}) {
             break;
           }
 
+          case 'poke': {
+            // Poked: something from the databank — a question made from the
+            // interests of the room they have open, see `lib/questions.js` —
+            // said back to whoever poked and to nobody else. Nothing is
+            // posted. What to do with it is theirs to decide; a room is not
+            // prompted because one person in it pressed a button.
+            //
+            // Made from names alone, so it says nothing about the room that
+            // the name they sent did not: not who is in it, not what has been
+            // said. Never from a portal's name, which is not a name at all,
+            // or from a group's own conversation, which is the group and not
+            // an interest. Without a room, from something they hold; holding
+            // nothing, from anything in the catalogue.
+            const usable = (subjects) => subjects.filter((s) => !isPortal(s) && !isGroupRoom(s) && world.subjects.has(s));
+            let about = usable(parse(String(msg.room ?? '')));
+            if (!about.length) {
+              const held = usable([...world.subscription(userId)]);
+              const open = held.length ? held : usable([...world.subjects]).filter((s) => !s.includes('/'));
+              about = open.length ? [open[Math.floor(Math.random() * open.length)]] : [];
+            }
+            send(socket, {
+              type: 'poked',
+              room: typeof msg.room === 'string' ? msg.room : null,
+              about: named(about),
+              text: about.length ? ask(named(about)) : 'The databank is empty: there is nothing here to ask about yet.',
+              machine: true,
+            });
+            break;
+          }
+
+          case 'chart': {
+            // The whole catalogue laid flat, for exploring; see `World.chart`.
+            // Asked for when the explorer opens rather than pushed, since it is
+            // a hundred-odd kilobytes that most visits never look at. Asked
+            // again every ten seconds while it is open, by a page that already
+            // has it: then only how lively each interest is, unless who holds
+            // what has changed since.
+            const chart = world.chart();
+            if (msg.have && msg.have === chart.shape) {
+              send(socket, {
+                type: 'chart',
+                only: 'activity',
+                shape: chart.shape,
+                activity: chart.subjects.filter((s) => s.a).map((s) => [s.id, s.a]),
+              });
+            } else {
+              send(socket, { type: 'chart', ...chart });
+            }
+            break;
+          }
+
           case 'readers': {
             // Who is present in a room, and their public keys, so a sender can
             // wrap a message key for each of them.
@@ -753,7 +931,17 @@ export function createEulerChat(options = {}) {
 
           case 'atlas': {
             const want = Math.min(14, Math.max(2, Number(msg.subjects) || 5));
-            send(socket, { type: 'atlas', ...world.atlasFor(userId, want) });
+            const view = world.atlasFor(userId, want);
+            // How many are lurking in each room; see `lurkers`.
+            for (const room of view.rooms) room.lurkers = lurkers.get(room.key) ?? 0;
+            // Asked again every ten seconds by a page that has the drawing
+            // already: then only the rooms, which are what have changed. A
+            // drawing is a couple of hundred kilobytes; the rooms, a couple.
+            if (msg.have && msg.have === view.shape) {
+              send(socket, { type: 'atlas', only: 'rooms', shape: view.shape, subscription: view.subscription, rooms: view.rooms });
+            } else {
+              send(socket, { type: 'atlas', ...view });
+            }
             break;
           }
 
@@ -777,8 +965,14 @@ export function createEulerChat(options = {}) {
             send(socket, {
               type: 'results',
               query: String(msg.query ?? ''),
-              subjects: world.searchSubjects(msg.query),
+              // Inside a group, the group's copies; see `World.searchSubjects`.
+              subjects: world.searchSubjects(msg.query, undefined, { group: world.groupOf(userId) }),
             });
+            break;
+          }
+
+          case 'browse': {
+            send(socket, { type: 'browse', ...world.browse(msg.at ?? null, { group: world.groupOf(userId) }) });
             break;
           }
 
@@ -796,12 +990,7 @@ export function createEulerChat(options = {}) {
               // Written beside their name, and only ever a key they have shown.
               authorKey: session.proven ? session.keyId : null,
             });
-            // Only people with a connection open can be sent anything, so the
-            // audience search is narrowed to them rather than to every member.
-            const audience = world.audienceFor(message.subjects, sessions.present());
-            for (const listener of sessions.reaching(audience)) {
-              send(listener.socket, { type: 'message', message });
-            }
+            deliver(message);
             break;
           }
 
@@ -817,6 +1006,8 @@ export function createEulerChat(options = {}) {
     socket.on('close', () => {
       sessions.close(sessionId);
       if (closed) return; // shutting down; nobody is coming back to reclaim it
+      // A lurker that goes is one fewer watching, and the room is told so.
+      if (session.watching) watchRoom(session, null);
 
       const leaving = userId;
       // Another tab, or their phone: one of their connections has gone and
@@ -918,6 +1109,7 @@ export function createEulerChat(options = {}) {
       notifications.close();
       clearInterval(sweeper);
       clearInterval(heartbeat);
+      asking?.stop();
       for (const pending of orphans.values()) clearTimeout(pending);
       orphans.clear();
       wss.close();

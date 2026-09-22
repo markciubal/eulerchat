@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { World, seed, MAX_SUBSCRIPTIONS, MAX_SUBJECTS } from '../server/store.js';
+import { World, seed, stock, MAX_SUBSCRIPTIONS, MAX_SUBJECTS } from '../server/store.js';
 import { populate, rng } from '../server/populate.js';
 import { MAX_ARITY, buildIndex, census } from '../lib/regions.js';
 
@@ -173,7 +173,8 @@ test('the rail lists a handful, never the catalogue', () => {
 
   assert.deepEqual(view.rail.held, ['art']);
   assert.deepEqual(view.rail.suggested.sort(), ['music', 'philosophy']);
-  assert.equal(view.rail.total, 403);
+  // Everything the install stocks, `art`, and the four hundred added here.
+  assert.equal(view.rail.total, stock(new World()).subjects.size + 1 + 400);
 
   // Nothing appears twice, and the whole rail stays small no matter how big
   // the catalogue gets.

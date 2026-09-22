@@ -33,6 +33,12 @@ export interface Message {
   /** Empty when `sealed`: the server has no readable copy of one of those. */
   body: string;
   at: number;
+  /**
+   * A system message: written by the server, not by a person — a sample
+   * world's lines, or a question from `questions`. Set only by the server, and
+   * part of the message's hash, so a restored copy cannot drop or add it.
+   */
+  machine?: boolean;
   /** How many people it reaches, which is what decides whether to interrupt. */
   reach?: number;
   sealed?: boolean;
@@ -77,6 +83,35 @@ export interface Room {
   messages: number;
 }
 
+/**
+ * A subject somebody does not hold, and the rooms joining it would open for
+ * them: occupied regions containing it whose other subjects they already hold.
+ *
+ * Ranked by how unusual those rooms are rather than by how large — the
+ * opposite of `Rail.popular`, deliberately. See `World.discoveries`.
+ */
+export interface Discovery {
+  subject: string;
+  /** How many people hold it today. */
+  population: number;
+  /** The strongest few, key and population. May be a prefix of them all. */
+  rooms: Array<{ key: RegionKey; population: number }>;
+  /** How many rooms would open in total, including any not listed above. */
+  opens: number;
+  /** 0 to 1, against the strongest suggestion in the same list. */
+  score: number;
+}
+
+export interface Rail {
+  held: string[];
+  suggested: string[];
+  /** A few large rooms to fall into. Ranked by size; see `discoveries`. */
+  popular: string[];
+  /** Subjects they do not hold, ranked by what joining one would open. */
+  discoveries: Discovery[];
+  total: number;
+}
+
 export interface DiagramView extends Layout {
   rooms: Room[];
   /** Subjects the viewer holds that did not fit in the view. */
@@ -84,12 +119,21 @@ export interface DiagramView extends Layout {
   /** Neighbouring subjects shown but not held. */
   suggested: string[];
   subscription: string[];
-  rail: { held: string[]; suggested: string[]; popular: string[]; total: number };
+  rail: Rail;
 }
 
 export interface AtlasView extends Atlas {
   subscription: string[];
-  rooms: Array<Room & { here: number }>;
+  /**
+   * Names the drawing: the same for the same subjects and regions, so a page
+   * that has this drawing can ask for only the rooms. See `atlasFor`.
+   */
+  shape: string;
+  /**
+   * `activity`: how lively it has been lately, 0 to 1 against the liveliest
+   * room on the platform — the height the map raises it to. See `activity()`.
+   */
+  rooms: Array<Room & { here: number; activity: number }>;
 }
 
 /**
@@ -104,7 +148,11 @@ export class World {
   messages: Map<RegionKey, Message[]>;
 
   addSubject(name: string): string;
-  addUser(name: string): string;
+  /**
+   * `synthetic` marks one of a sample world's people rather than a person;
+   * only they are ever posted as by the server. See `questions` in `createEulerChat`.
+   */
+  addUser(name: string, options?: { synthetic?: boolean }): string;
   /**
    * Change what somebody is called; returns the name they now have. The dot
    * that separates a name from a key is taken out, and an unusable name leaves
@@ -123,8 +171,48 @@ export class World {
   diagramFor(userId: string): DiagramView;
   /** The same, drawn with routed boundaries and more subjects. */
   atlasFor(userId: string, limit?: number): AtlasView;
-  /** A cheap fingerprint of what their screen would show. */
+  /**
+   * A cheap fingerprint of what their screen would show.
+   *
+   * Deliberately says nothing about `rail.discoveries`, which move on almost
+   * any membership change nearby: counting them would turn "redraw the few
+   * sessions whose picture moved" back into "redraw everybody".
+   */
   viewSignature(userId: string): string;
+
+  /**
+   * Subjects they do not hold, and the rooms joining one would open.
+   *
+   * Not a guess about taste: each one carries occupied regions containing that
+   * subject whose other subjects this person already holds, so the offer is
+   * "there are three people in `entomology+mycology` and you are one subject
+   * short of it". Ranked by how unusual those rooms are rather than by how
+   * busy — `rail.popular` is the other ranking, on purpose.
+   *
+   * Somebody holding nothing has no overlap to be one step from, and gets the
+   * subjects worth standing in first instead.
+   */
+  discoveries(
+    userId: string,
+    options?: {
+      /** How many subjects to return. Default 5. */
+      limit?: number;
+      /** How many rooms to carry as evidence for each. Default 3. */
+      rooms?: number;
+      /** 0 goes deeper into what they hold, 1 reaches further out. */
+      novelty?: number;
+    },
+  ): Discovery[];
+
+  /**
+   * What to list beside the diagram: never the catalogue. `popular` is a few
+   * large rooms to fall into, `discoveries` is what would open.
+   */
+  rail(
+    held: Iterable<string>,
+    suggested?: string[],
+    options?: { popular?: number; discover?: number; userId?: string; novelty?: number },
+  ): Rail;
 
   post(
     userId: string,
@@ -141,6 +229,12 @@ export class World {
        * vouching for it.
        */
       authorKey?: string | null;
+      /**
+       * Mark it a system message: written by the server, not by the person it
+       * is posted as. For anything a person did not type — never set it from
+       * what a connection sends.
+       */
+      machine?: boolean;
     },
   ): Message;
 
@@ -158,7 +252,7 @@ export class World {
   ): { messages: number; perMinute: number; last: Message | null };
 
   /** What one person's client needs, with no geometry in it. */
-  stateFor(userId: string): { subscription: string[]; funnel: number; rail: unknown };
+  stateFor(userId: string): { subscription: string[]; funnel: number; rail: Rail };
 
   // --- reports -----------------------------------------------------------
 
@@ -269,7 +363,106 @@ export class World {
   audienceFor(tags: Iterable<string>, among?: Iterable<string>): string[];
   historyFor(userId: string): Record<RegionKey, Message[]>;
 
-  searchSubjects(query: string, limit?: number): Array<{ id: string; population: number }>;
+  /**
+   * By the letters in a name, or by another word for it: `soccer` finds
+   * `football`. Inside a group, each match is the group's copy of it.
+   */
+  searchSubjects(
+    query: string,
+    limit?: number,
+    options?: { group?: string | null },
+  ): Array<{ id: string; population: number }>;
+
+  /**
+   * One level of the catalogue: what this world has directly under a category,
+   * or the broad divisions when `at` is nothing or is not a category. Inside a
+   * group, the same tree, as the group's copies.
+   */
+  browse(at?: string | null, options?: { group?: string | null }): CatalogueLevel;
+
+  /** Every occupied interest outside the groups, at its place in the hierarchy: the minimap. */
+  overview(): { subjects: ChartSubject[]; extent: number; classified: number };
+  /**
+   * Every interest outside the groups, occupied or not, with the divisions and
+   * fields named at the middle of what they cover. What the explorer draws;
+   * asked for when it opens.
+   */
+  chart(): { subjects: ChartSubject[]; labels: ChartLabel[]; links: ChartLink[]; extent: number; shape: string };
+  /**
+   * How lively each room and each interest has been lately, 0 to 1 against
+   * the liveliest on the platform. Every message counts, halving in weight
+   * each hour of age; portals are left out, and groups do not set the scale.
+   * See `lib/activity.js`.
+   */
+  activity(): { rooms: Map<RegionKey, number>; subjects: Map<string, number> };
+
+  /** The group somebody is in (the one whose own conversation they hold), or null. */
+  groupOf(userId: string): string | null;
+
+  /**
+   * One room as somebody outside it sees it — a lurker, come in by a quick-join
+   * code: what has been said, how many are in it, how busy it is. Null for
+   * anything that cannot be a room, and for a portal.
+   */
+  look(roomKey: string): {
+    room: RegionKey;
+    subjects: string[];
+    here: boolean;
+    population: number;
+    stats: { messages: number; perMinute: number; last: object | null };
+    messages: Message[];
+  } | null;
+}
+
+/**
+ * Two interests people hold together: both, how many hold both, and that as
+ * a share of everybody holding either, damped where the numbers are small.
+ * Never a pair only one person holds. See `lib/association.js`.
+ */
+export type ChartLink = [a: string, b: string, both: number, share: number];
+
+/** One interest on the overview or the chart. */
+export interface ChartSubject {
+  id: string;
+  /** How many hold it. */
+  n: number;
+  x: number;
+  y: number;
+  /** Whether the catalogue knows where it goes; the rest sit on an outer ring. */
+  known: boolean;
+  /** Its field, division and so on, nearest first. The chart only. */
+  up?: string[];
+  /**
+   * How lively it has been lately, 0 to 1 against the liveliest interest on
+   * the platform: the height of its column. The chart only, and left off
+   * where it is nought.
+   */
+  a?: number;
+}
+
+/** A division (depth 1) or field (depth 2), named where its interests are. */
+export interface ChartLabel {
+  name: string;
+  x: number;
+  y: number;
+  depth: 1 | 2;
+  /** How many interests it covers. */
+  count: number;
+}
+
+export interface CatalogueLevel {
+  /** The category being looked at, or null at the top. */
+  at: string | null;
+  /** The way back up, broadest first, ending with `at`. */
+  path: string[];
+  children: Array<{
+    id: string;
+    population: number;
+    /** How many interests sit beneath this one, at any depth. Zero for one with nothing under it. */
+    inside: number;
+    /** Up to three of what is directly beneath it, the busiest and biggest first. */
+    sample: string[];
+  }>;
 }
 
 /**
@@ -313,5 +506,14 @@ export declare const KEEP_FOR: number;
  */
 export declare const REPORTS_KEEP_FOR: number;
 
-/** A small hand-written world: art, philosophy, music, and some conversation. */
+/**
+ * Put the whole bundled catalogue into a world: interests only, no people and
+ * no messages. The right start for a real deployment.
+ */
+export function stock(world: World): World;
+
+/**
+ * What a fresh install opens with: the stocked catalogue, plus a few made-up
+ * people talking in art, philosophy and music so the map has something on it.
+ */
 export function seed(world: World): World;

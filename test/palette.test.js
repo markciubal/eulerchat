@@ -72,23 +72,47 @@ test('every subject in the catalogue is visible on both themes', () => {
   assert.deepEqual(failures, [], `${failures.length} of ${catalogue.length} subjects are hard to see`);
 });
 
-test('a room of opposite subjects is neutral rather than a third colour', () => {
-  // The circular mean of two opposite hues is whatever the rounding left
-  // behind: art and philosophy sit nearly opposite, and their "average" used
-  // to be an orange that neither of them is - and that a genuinely orange
-  // third subject in the same view would also have worn.
-  assert.ok(coherence(['art', 'philosophy']) < 0.1, 'these two should disagree');
-  const muddle = regionFill(['art', 'philosophy']);
-  const [r, g, b] = [1, 3, 5].map((i) => parseInt(muddle.slice(i, i + 2), 16));
-  assert.ok(Math.max(r, g, b) - Math.min(r, g, b) < 24, `${muddle} is too colourful to be honest`);
+/** How far apart a colour's channels are: roughly, how colourful it is. */
+const spread = (hex) => {
+  const v = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  return Math.max(...v) - Math.min(...v);
+};
 
-  // Where they do agree, the room is coloured, and it sits between them.
+test('a room whose subjects disagree does not state a confident colour', () => {
+  // The circular mean of two opposite hues is whatever the rounding left
+  // behind: art and philosophy sit nearly opposite, and their "average" is an
+  // orange that neither of them is — one a genuinely orange third subject in
+  // the same view would also have worn. The rooms are vivid by design, so the
+  // guard is not that this one comes out grey but that it comes out visibly
+  // less sure of itself than a room whose subjects agree.
+  assert.ok(coherence(['art', 'philosophy']) < 0.1, 'these two should disagree');
   assert.ok(coherence(['art', 'music']) > 0.9, 'these two should agree');
-  const together = regionFill(['art', 'music']);
-  const spread = [1, 3, 5].map((i) => parseInt(together.slice(i, i + 2), 16));
-  assert.ok(Math.max(...spread) - Math.min(...spread) > 24, `${together} should carry their colour`);
+
+  const unsure = spread(regionFill(['art', 'philosophy']));
+  const sure = spread(regionFill(['art', 'music']));
+  assert.ok(
+    unsure < sure * 0.6,
+    `a room of opposite subjects (${unsure}) should be far less colourful than one of neighbours (${sure})`,
+  );
+
+  // And where they do agree, the room sits between them on the wheel.
   const between = blend(['art', 'music']);
   assert.ok(between > 306 && between < 340, `${between} should lie between the two hues`);
+});
+
+test('rooms are vivid, and every one of them at the same strength', () => {
+  // High saturation is the point of the fills; equal brightness is what keeps
+  // a yellow room from washing out on the light theme and a blue one from
+  // disappearing on the dark one.
+  for (const room of [['art'], ['music'], ['philosophy'], ['art', 'music']]) {
+    assert.ok(spread(regionFill(room)) > 120, `${room.join('+')} should be vivid`);
+  }
+
+  // At one depth, because depth is the other thing lightness carries: a
+  // deeper room is meant to sit darker, and the test below says so.
+  const lit = [['art'], ['music'], ['philosophy']].map((r) => luminance(regionFill(r)));
+  const drift = Math.max(...lit) - Math.min(...lit);
+  assert.ok(drift < 0.02, `three hues at one depth should match, spread ${drift.toFixed(3)}`);
 });
 
 test('a deeper room is a darker room', () => {

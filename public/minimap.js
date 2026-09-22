@@ -24,8 +24,11 @@ import { NS, stroke } from './diagram.js';
  * for. So the scale is derived first from the pixels actually available, and
  * the box follows from it.
  */
-export function fitTo(svg, points, pad = 20) {
-  const box = svg.getBoundingClientRect?.() ?? { width: 0, height: 0 };
+export function fitTo(svg, points, pad = 20, measured = null) {
+  // Measured already, where it can be: asking the page again after changing
+  // the drawing makes it lay the whole drawing out on the spot, which in the
+  // middle of orbiting a thousand columns is most of the frame.
+  const box = measured ?? svg.getBoundingClientRect?.() ?? { width: 0, height: 0 };
   const W = box.width || 600;
   const H = box.height || 600;
   if (!points.length) return null;
