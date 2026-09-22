@@ -4,7 +4,7 @@
  * mounted into somebody else's application instead.
  */
 
-import { createEulerChat, World, seed, populate } from './app.js';
+import { createEulerChat, World, seed, stock, populate } from './app.js';
 import { FileLedger } from './ledger.js';
 
 const flag = (name, fallback) => {
@@ -18,9 +18,23 @@ const flag = (name, fallback) => {
 // the wrong address, and has no reason to suspect the flag.
 const PORT = flag('port', Number(process.env.PORT ?? 8787));
 
-// `--interests 1000` builds a synthetic world at scale; with no flag you get
-// the small hand-written one, which is the better thing to read the code by.
+/**
+ * What the world starts with.
+ *
+ * With no flag, the catalogue and nothing else: every interest there is, with
+ * nobody in it and nothing said. That is what a deployment runs — the
+ * `Procfile` passes no flags — and the only honest start for one. This used
+ * to be the sample world instead, so every deployment, and every restart of
+ * one, opened on two dozen made-up people and six things none of them said,
+ * and anybody arriving saw rooms that looked lived in and were not.
+ *
+ * `--sample` is that sample world, for trying it out on your own: a few
+ * made-up people in three corners, so the map has something on it.
+ * `--interests 1000` builds a synthetic world at scale, for the same reason
+ * and for measuring.
+ */
 const interests = flag('interests', 0);
+const sample = process.argv.includes('--sample');
 const world = new World();
 
 /**
@@ -53,7 +67,8 @@ if (wantsLedger) {
 }
 
 if (interests > 0) populate(world, { subjects: interests, users: flag('people', 4000) });
-else seed(world);
+else if (sample) seed(world);
+else stock(world);
 
 /**
  * Who may read reports, by the key they hold.
@@ -90,6 +105,10 @@ const chat = createEulerChat({
 });
 if (questions) {
   console.log(`eulerchat: sample people will ask a question, labelled as a system message, about every ${questions.every / 1000}s`);
+  // Only ever as one of the sample people, so without any it never asks.
+  if (!sample && !(interests > 0)) {
+    console.log('  There are no sample people without --sample or --interests, so no question will be asked.');
+  }
 }
 
 /**
@@ -138,6 +157,7 @@ chat.server.listen(PORT, () => {
   console.log(
     `eulerchat listening on http://localhost:${PORT}\n` +
       `  ${world.subjects.size} interests · ${world.members.size} people · ` +
-      `${counts.size.toLocaleString()} occupied regions`,
+      `${counts.size.toLocaleString()} occupied regions` +
+      (sample || interests > 0 ? ' · made-up people, for trying it out' : ''),
   );
 });

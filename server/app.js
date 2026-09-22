@@ -55,7 +55,10 @@ export { World, seed, stock, populate, Sessions, Notifications };
  * @returns {{world: World, server: http.Server, wss: WebSocketServer, close: () => void}}
  */
 export function createEulerChat(options = {}) {
-  const { world = seed(new World()), serveClient = true } = options;
+  // The catalogue alone unless a world is given: a host that forgets to pass
+  // one is putting this somewhere real, and made-up people there would be
+  // passed off as real ones.
+  const { world = stock(new World()), serveClient = true } = options;
   const server = options.server ?? http.createServer();
   const ours = options.server === undefined;
   // Where this lives on the host's server. '' means the root.

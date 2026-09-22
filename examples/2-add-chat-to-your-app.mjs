@@ -7,7 +7,7 @@
  *   node examples/2-add-chat-to-your-app.mjs
  */
 import http from 'node:http';
-import { createEulerChat, World, seed } from 'eulerchat/app';
+import { createEulerChat, World, stock } from 'eulerchat/app';
 
 const app = http.createServer((req, res) => {
   if (req.url === '/') res.writeHead(200).end('your app');
@@ -15,7 +15,7 @@ const app = http.createServer((req, res) => {
 });
 
 const chat = createEulerChat({
-  world: seed(new World()),  // or your own, built with addSubject/addUser/join
+  world: stock(new World()), // the catalogue, nobody in it yet; seed() adds made-up people for a demo
   server: app,               // attaches to yours
   mount: '/chat',            // lives under a path; omit for the root
 });

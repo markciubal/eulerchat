@@ -1403,10 +1403,11 @@ function drawAtlas({ repaint = true, fit = false } = {}) {
 
   const { report, subjects, zones } = view;
   const split = report.disconnected.length;
-  $('fit').textContent = split
-    ? `${subjects.length} subjects · ${zones.length} conversations, drawn to scale · ` +
-      `${split} subject${split === 1 ? '' : 's'} drawn in several pieces`
-    : `${subjects.length} subjects · ${zones.length} conversations, drawn to scale`;
+  // A new deployment starts with one person in one interest, so the ones are
+  // what anybody reads first.
+  const count = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const drawn = `${count(subjects.length, 'subject')} · ${count(zones.length, 'conversation')}, drawn to scale`;
+  $('fit').textContent = split ? `${drawn} · ${count(split, 'subject')} drawn in several pieces` : drawn;
   $('fit').classList.toggle('flag', !report.wellFormed);
 }
 

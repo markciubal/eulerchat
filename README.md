@@ -17,8 +17,9 @@ import { census, layout, zones, atlas } from 'eulerchat';
 
 ```
 npm install
-npm start          # http://localhost:8787 — 1,100 interests, three of them busy
-npm run start:large # 1000 interests, 4000 people
+npm start          # http://localhost:8787 — 1,100 interests, nobody in them yet
+npm run start:sample # the same, with a few made-up people in three of them
+npm run start:large # 1000 interests, 4000 made-up people
 npm run start:questions # the sample people ask questions, as system messages
 npm test
 
@@ -141,11 +142,11 @@ notes.drain(userId);   // what they missed, most urgent first
 ### Mount the chat server in an app you already have
 
 ```js
-import { createEulerChat, World, seed } from 'eulerchat/app';
+import { createEulerChat, World, stock } from 'eulerchat/app';
 
 const chat = createEulerChat({
-  world: seed(new World()),   // the catalogue and a few demo people; `stock(new World())`
-                              // for the catalogue alone; or build your own with addSubject
+  world: stock(new World()),  // the catalogue alone, which is also the default; `seed(new World())`
+                              // adds a few made-up people, for a demo; or build your own
   server: myHttpServer,       // attaches to yours; omit to get its own
   mount: '/chat',             // lives under a path; omit for the root
   serveClient: true,          // also serve the bundled UI
@@ -1515,7 +1516,8 @@ rather than papered over. The default is five.
 ## Deploying
 
 There is a `Procfile` and the port comes from `process.env.PORT`, so it boots
-on a single dyno. Memory is not the constraint — a world of 1000 interests and
+on a single dyno. It starts with the catalogue and nobody in it: no made-up
+people and nothing said, which only `--sample` and `--interests` add. Memory is not the constraint — a world of 1000 interests and
 50,000 people is 36.5MB of heap, a connected session about 4.8KB, and a diagram
 push 3.1KB on the wire. A 512MB dyno has room to spare.
 

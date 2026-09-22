@@ -139,8 +139,9 @@
   },
   "scripts": {
     "start": "node server/index.js",
+    "start:sample": "node server/index.js --sample",
     "start:large": "node server/index.js --interests 1000 --people 4000",
-    "start:questions": "node server/index.js --questions 30",
+    "start:questions": "node server/index.js --sample --questions 30",
     "test": "node --test",
     "render": "node tools/render.js"
   },
