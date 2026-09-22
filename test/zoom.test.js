@@ -58,7 +58,7 @@ test('a label spells itself out once there is room, and not before', () => {
   // the whole reason the short form existed.
   relabel(written, 8);
   assert.equal(overlap.text.textContent, overlap.long);
-  assert.match(overlap.long, / ∩ /);
+  assert.match(overlap.long, / \+ /);
 });
 
 test('text holds its size on screen as the map grows under it', () => {

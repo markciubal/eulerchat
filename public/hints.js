@@ -26,20 +26,22 @@ export const HELP = {
   atlas: {
     title: 'Map',
     short:
-      'Each shape is an interest. Where shapes overlap is a conversation for people '
+      'Each shape is an interest. Where shapes overlap is a chat for people '
       + 'in both.',
     more:
-      'Bigger shapes have more people. Click a spot to open its conversation. Drag to '
+      'Bigger shapes have more people. Click a spot to open its chat. Drag to '
       + 'move it, and scroll or pinch to zoom. In 3D, turn it with two fingers, or by '
       + 'dragging with the right mouse button. "Reset view" under View goes back. '
-      + '"Expand" opens the map full screen.',
+      + '"Expand" opens the map full screen. Right-click a chat — or hold a finger on '
+      + 'it — for what else can be done with it, branching out into a community '
+      + 'included.',
   },
   rooms: {
-    title: 'Conversations',
+    title: 'Chats',
     short:
-      'Every conversation on the map, as a list. Select one to open it.',
+      'Every chat on the map, as a list. Select one to open it.',
     more:
-      'The number is how many people are in it. Bold ones are conversations you are '
+      'The number is how many people are in it. Bold ones are chats you are '
       + 'in. The small squares show which interests it combines. Hover to see how busy '
       + 'it is and the last message.',
   },
@@ -49,12 +51,12 @@ export const HELP = {
       'What you have joined, related interests, and popular ones. Search to find '
       + 'anything else, or browse by category at the bottom of the list.',
     more:
-      'Joining an interest puts you in its conversation and in any conversation it '
+      'Joining an interest puts you in its chat and in any chat it '
       + 'shares with your other interests. You can leave any time. Click the coloured '
       + 'square next to an interest to change its colour.',
   },
   funnel: {
-    title: 'Also join',
+    title: 'When I join, also join',
     short:
       'Interests can be very specific. This also puts you somewhere broader, so there '
       + 'are more people to find.',
@@ -73,7 +75,7 @@ export const HELP = {
       + 'where you are in it. Press it to explore all of them.',
   },
   catalogue: {
-    title: 'Add from the list',
+    title: 'Pick from the full list',
     short:
       'Every interest there is, grouped under the big categories. Pick one to join it.',
     more:
@@ -83,9 +85,9 @@ export const HELP = {
       + 'picked again.',
   },
   relief: {
-    title: 'Relief',
+    title: 'Heights',
     short:
-      'In 3D, each conversation stands as tall as it has been busy lately, compared '
+      'In 3D, each chat stands as tall as it has been busy lately, compared '
       + 'with the busiest on the whole site.',
     more:
       'Recent messages count the most: one from an hour ago counts half as much as '
@@ -109,9 +111,9 @@ export const HELP = {
     title: 'Desktop alerts',
     short:
       'Get a desktop notification when someone mentions you, or when a small '
-      + 'conversation you are in gets busy.',
+      + 'chat you are in gets busy.',
     more:
-      'You are not told about every message. Busy conversations only show a count.',
+      'You are not told about every message. Busy chats only show a count.',
   },
   fit: {
     title: 'Map accuracy',
@@ -126,17 +128,17 @@ export const HELP = {
     title: 'This place is public',
     short:
       'Anything you send unencrypted can be read by anyone, not only the people in '
-      + 'the conversation. Anyone can download every conversation.',
+      + 'the chat. Anyone can download every chat.',
     more:
       'This is deliberate: it lets people search and build on what is here. Treat '
       + 'anything you post unencrypted as public. To keep a message to the people in '
-      + 'the conversation, tick Encrypt.',
+      + 'the chat, tick Encrypt.',
   },
   privacy: {
     title: 'Encryption',
     short:
       'Encrypted messages are scrambled before they leave your browser, and only '
-      + 'people in the conversation can read them. Unencrypted messages are public.',
+      + 'people in the chat can read them. Unencrypted messages are public.',
     more:
       'This is the only setting here that keeps anything private. It does not stop '
       + 'the people you send it to from copying it, and it does not hide who you are '
@@ -154,7 +156,7 @@ export const HELP = {
   layout: {
     title: 'Layout',
     short:
-      'Drag the divider between the map and the conversation to resize them. "Pop '
+      'Drag the divider between the map and the chat to resize them. "Pop '
       + 'out" makes the map a window you can move and resize. Your browser remembers '
       + 'the layout.',
     more:
@@ -217,7 +219,7 @@ export const HELP = {
     title: 'Groups',
     short:
       'For the people around you. Create a group and they scan the code or open the '
-      + 'link, and you are all in the same conversation.',
+      + 'link, and you are all in the same chat.',
     more:
       'Inside, everything is laid out as it is outside, with the same interests in the '
       + 'same places, and the map draws a line round the group. Interests you join there '
@@ -228,23 +230,23 @@ export const HELP = {
   lurk: {
     title: 'Lurking',
     short:
-      'You came in by a quick-join code, so you are watching this one conversation '
+      'You came in by a quick-join code, so you are watching this one chat '
       + 'without being part of it. The people in it see how many are lurking, never '
       + 'who, and nothing is saved on this device.',
     more:
       'No key is made or shown and no earlier visit is picked up, so this visit ties you '
       + 'to nothing. Encrypted messages stay locked: they are for the people in the '
-      + 'conversation. "Join in" makes you part of it so you can talk; "Look around" '
+      + 'chat. "Join in" makes you part of it so you can talk; "Look around" '
       + 'shows the rest of the place. Either one ends lurking, and this device '
       + 'goes back to keeping your key and name as usual.',
   },
   quickjoin: {
     title: 'Quick join',
     short:
-      'A code for this conversation. Whoever scans it can lurk in it straight away, '
+      'A code for this chat. Whoever scans it can lurk in it straight away, '
       + 'reading along without joining anything.',
     more:
-      'The conversation shows how many are lurking, and nothing about who. '
+      'The chat shows how many are lurking, and nothing about who. '
       + 'That is no more than this place already allows, since unencrypted messages are '
       + 'public. They can join in whenever they like.',
   },
@@ -272,16 +274,16 @@ export const HELP = {
       'Every message from someone else has a "report" link. Use it for abuse, threats '
       + 'or other rule-breaking.',
     more:
-      'You will be asked why. Nobody in the conversation is told who reported. For an '
+      'You will be asked why. Nobody in the chat is told who reported. For an '
       + 'encrypted message, you are asked before its text is shown to a moderator.',
   },
   composer: {
     title: 'Posting',
     short:
-      'Type a message and press Post. Everyone in this conversation will see it.',
+      'Type a message and press Post. Everyone in this chat will see it.',
     more:
-      'If the box is greyed out, either no conversation is open or you have not '
-      + 'joined all of its interests. The conversation panel shows what to join.',
+      'If the box is greyed out, either no chat is open or you have not '
+      + 'joined all of its interests. The chat panel shows what to join.',
   },
   search: {
     title: 'Search',
@@ -290,7 +292,7 @@ export const HELP = {
     more: null,
   },
   subjects: {
-    title: 'Subjects shown',
+    title: 'Interests on the map',
     short:
       'How many interests the map shows at once. More shows more, but is harder to '
       + 'read.',

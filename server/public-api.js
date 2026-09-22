@@ -1,5 +1,6 @@
 /**
- * The open read side: rooms, logs, bulk scrape, deletion receipts, firehose.
+ * The open read side: rooms, logs, bulk scrape, deletion receipts, firehose,
+ * and the firehose's dumps.
  *
  * This is a public API in the strong sense. Anyone can read any room's log
  * without identifying themselves, and everything said here in the clear is
@@ -27,8 +28,17 @@
 import { parse } from '../lib/regions.js';
 import { clusterOf } from '../lib/cluster.js';
 import { isPortalRoom } from '../lib/portal.js';
+import { DUMP_BYTES, createDumps } from './dumps.js';
 
 const MAX_LIMIT = 500;
+
+/**
+ * The most the firehose will hold for one reader who is not keeping up. Past
+ * it they are let go rather than buffered for without end, and can pick up
+ * what they missed from the dumps, which are the same size for the same
+ * reason: nothing goes out from here more than a megabyte at a time.
+ */
+const MAX_BEHIND = DUMP_BYTES;
 
 const json = (res, status, body) => {
   const text = JSON.stringify(body);
@@ -70,12 +80,18 @@ const publicMessage = (message, tally) => ({
 /**
  * Build the handler and the firehose.
  *
- * Returns `{ handleRequest, publish, close }`. `publish` is what the server
- * calls for every event worth streaming; it is kept separate from the world's
- * own watcher so that what goes out publicly is an explicit decision at the
- * call site rather than whatever happens to be emitted internally.
+ * Returns `{ handleRequest, publish, forget, close }`. `publish` is what the
+ * server calls for every event worth streaming; it is kept separate from the
+ * world's own watcher so that what goes out publicly is an explicit decision
+ * at the call site rather than whatever happens to be emitted internally.
+ * `forget` is how the dumps hear that something is gone.
+ *
+ * `dumps` keeps what the firehose sends, a megabyte at a time, for anybody
+ * who was not holding it open; see `dumps.js`. Off unless asked for, like the
+ * rest of this: the server turns it on where it turns the API on. `demo`
+ * says, in the index and in every dump, that none of it was said by anyone.
  */
-export function createPublicApi(world, { mount = '', basePath = '/api' } = {}) {
+export function createPublicApi(world, { mount = '', basePath = '/api', dumps: dumping = false, demo = false } = {}) {
   // A host that already has its own `/api` can move this out of the way.
   const listeners = new Set();
   let closed = false;
@@ -83,15 +99,17 @@ export function createPublicApi(world, { mount = '', basePath = '/api' } = {}) {
   const at = (path) => `${mount}${basePath}${path}`;
 
   /** Send one event to everybody holding the firehose open. */
-  const publish = (event) => {
-    if (closed || !listeners.size) return;
-    // A portal is the one room this side of the product does not carry. The
-    // check is here rather than at the call site because this is the single
-    // place everything public passes through, and a second call site would
-    // eventually be added without one.
-    if (isPortalRoom(event.room)) return;
+  const broadcast = (event) => {
+    if (!listeners.size) return;
     const frame = `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
     for (const res of listeners) {
+      // Somebody reading slower than the place talks, and a megabyte behind:
+      // let go, rather than hold an ever longer queue of it for them.
+      if (res.writableLength > MAX_BEHIND) {
+        listeners.delete(res);
+        res.end();
+        continue;
+      }
       try {
         res.write(frame);
       } catch {
@@ -99,6 +117,30 @@ export function createPublicApi(world, { mount = '', basePath = '/api' } = {}) {
       }
     }
   };
+
+  const dumps = dumping
+    ? createDumps({
+        ...(typeof dumping === 'object' ? dumping : {}),
+        demo,
+        // Said on the firehose, so that a reader knows there is one to fetch.
+        onDump: (dump) => broadcast({ type: 'dump', ...dump, url: at(`/dumps/${dump.id}`), at: Date.now() }),
+      })
+    : null;
+
+  /** One event, to the firehose and into the dumps. */
+  const publish = (event) => {
+    if (closed) return;
+    // A portal is the one room this side of the product does not carry. The
+    // check is here rather than at the call site because this is the single
+    // place everything public passes through, and a second call site would
+    // eventually be added without one.
+    if (isPortalRoom(event.room)) return;
+    dumps?.add(event);
+    broadcast(event);
+  };
+
+  /** These messages are gone: out of every dump, as they are out of the place. */
+  const forget = (ids) => dumps?.forget(ids);
 
   const rooms = () => {
     const census = world.census();
@@ -160,12 +202,49 @@ export function createPublicApi(world, { mount = '', basePath = '/api' } = {}) {
         scrape: at('/scrape'),
         receipts: at('/receipts'),
         firehose: at('/firehose'),
+        dumps: dumps ? at('/dumps') : null,
+        ...(demo ? { demo: true } : {}),
         notes: {
           open: 'Everything readable here is public. Sealed messages are served as ciphertext.',
           sealed: 'A sealed message has body null and an envelope the server cannot open.',
           reports: 'Not served here. Reports name the person who made them.',
+          dumps:
+            'The firehose, a megabyte at a time: one JSON event per line. A dump loses a message '
+            + 'when the place forgets it, and goes twelve hours after the last thing in it.',
+          ...(demo ? { demo: 'A demo. Every word here was made up by the server.' } : {}),
         },
       });
+      return true;
+    }
+
+    // The firehose, for anybody who was not holding it open.
+    if (dumps && rest === '/dumps') {
+      const { dumps: made, ...more } = dumps.list();
+      json(res, 200, {
+        ...more,
+        dumps: made.map((d) => ({ ...d, url: at(`/dumps/${d.id}`) })),
+        ...(demo ? { demo: true } : {}),
+      });
+      return true;
+    }
+
+    const dumpMatch = dumps && rest.match(/^\/dumps\/(\d+)$/);
+    if (dumpMatch) {
+      const body = dumps.body(dumpMatch[1]);
+      if (body === null) {
+        json(res, 404, { error: 'no such dump, or it has been forgotten' });
+        return true;
+      }
+      res.writeHead(200, {
+        'content-type': 'application/x-ndjson; charset=utf-8',
+        'content-length': Buffer.byteLength(body),
+        'content-disposition': `inline; filename="eulerchat-dump-${dumpMatch[1]}${demo ? '-demo' : ''}.ndjson"`,
+        'access-control-allow-origin': '*',
+        // Not cacheable: it shrinks as what is in it is forgotten, and a
+        // cached copy is a copy that did not.
+        'cache-control': 'no-store',
+      });
+      res.end(body);
       return true;
     }
 
@@ -244,6 +323,7 @@ export function createPublicApi(world, { mount = '', basePath = '/api' } = {}) {
   return {
     handleRequest,
     publish,
+    forget,
     publicMessage,
     get subscribers() {
       return listeners.size;

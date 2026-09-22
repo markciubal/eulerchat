@@ -29,14 +29,24 @@ import { fingerprint } from '../lib/seal.js';
 import { challenge } from '../lib/proof.js';
 import { createPublicApi } from './public-api.js';
 import { startQuestions } from './questions.js';
+import { startTraffic } from './traffic.js';
 import { ask } from '../lib/questions.js';
 import { isGroupRoom, named } from '../lib/cluster.js';
-import { isPortal } from '../lib/portal.js';
+import { isPortal, isPortalRoom } from '../lib/portal.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(here, '..', 'public');
 const libDir = path.join(here, '..', 'lib');
 const projectRoot = path.join(here, '..');
+
+/**
+ * How many commitments go in one `forgotten` event on the firehose, at 67
+ * bytes each: about 135 kB, well inside a dump and a reader's allowance.
+ */
+export const FORGOTTEN_PER_EVENT = 2000;
+
+/** How many interests one `join` may take at once; see the handler. */
+export const JOIN_AT_ONCE = 40;
 
 export { World, seed, stock, populate, Sessions, Notifications };
 
@@ -49,6 +59,10 @@ export { World, seed, stock, populate, Sessions, Notifications };
  * @param {(req: http.IncomingMessage) => object | null | Promise<object | null>} [options.authenticate]
  *   who the host says a connection is; anonymous when omitted
  * @param {boolean | {every?: number, quiet?: number}} [options.questions]
+ * @param {boolean | {rate?: number, near?: number, churn?: number, reply?: number, warm?: number}} [options.traffic]
+ *   made-up people talking and coming and going, for the demo only; see
+ *   `server/traffic.js` and `server/demo.js`
+ * @param {boolean} [options.demo]  tell every page this is the demo, so it says so
  *   now and then, have the sample people ask an on-topic question in a quiet
  *   room, labelled as a system message; off unless asked for. See
  *   `server/questions.js`.
@@ -131,7 +145,18 @@ export function createEulerChat(options = {}) {
    * `api`. Everything it serves is public by design; see `public-api.js` for
    * what that decision costs and what it deliberately leaves out.
    */
-  const api = createPublicApi(world, { mount, basePath: options.apiPath ?? '/api' });
+  //
+  // The dumps come with it and go with it: they are the firehose kept for
+  // whoever was not listening, so they are public exactly when it is. A host
+  // placing `handleRequest` behind its own routing can ask for them with
+  // `dumps`.
+  const published = options.publicApi === true;
+  const api = createPublicApi(world, {
+    mount,
+    basePath: options.apiPath ?? '/api',
+    dumps: options.dumps ?? published,
+    demo: options.demo === true,
+  });
 
   // Off unless asked for, and that default is the important part.
   //
@@ -144,7 +169,7 @@ export function createEulerChat(options = {}) {
   //
   // `chat.api.handleRequest` is still there either way, for anybody who wants
   // to place it behind their own middleware.
-  if (options.publicApi === true) server.prependListener('request', api.handleRequest);
+  if (published) server.prependListener('request', api.handleRequest);
 
   // Everything said, as it is said. Fed from the world's own watcher so that
   // nothing can reach a room without also reaching the stream - two separate
@@ -154,6 +179,38 @@ export function createEulerChat(options = {}) {
       api.publish({ type: 'message', ...api.publicMessage(event.message, world.tally(event.message.id)) });
     } else if (event.type === 'room-opened' || event.type === 'room-closed') {
       api.publish({ type: event.type, room: event.room, at: Date.now() });
+    } else if (event.type === 'forgotten') {
+      // Out of the dumps, and said on the firehose, so that anybody holding a
+      // copy knows to let it go. Only what the firehose ever carried: a
+      // portal's messages were never on it, and naming them now would be the
+      // first anybody heard of them.
+      //
+      // Named by their commitments from the deletion record, not by their
+      // ids. Anybody holding a copy recomputes the commitment from it (every
+      // field is in the message as the stream sent it; see `lib/receipt.js`)
+      // and finds it here. An id is also in replies and links, so saying it
+      // would tell anybody who has seen one that the message went, and why,
+      // without their ever having read it.
+      //
+      // A few thousand to an event. A commitment is 67 bytes as JSON, and a
+      // sweep of the clock can forget a whole busy half-day at once: sent as
+      // one event it would be too big for any dump to take, and put every
+      // reader of the firehose a megabyte behind in one go. Each part carries
+      // the same record, and says which part it is when there is more than one.
+      api.forget(event.messages.map((m) => m.id));
+      const commitments = event.messages.filter((m) => !isPortalRoom(m.room)).map((m) => m.commitment);
+      const parts = Math.ceil(commitments.length / FORGOTTEN_PER_EVENT);
+      for (let i = 0; i < parts; i++) {
+        api.publish({
+          type: 'forgotten',
+          reason: event.reason,
+          seq: event.seq,
+          receipt: event.hash,
+          commitments: commitments.slice(i * FORGOTTEN_PER_EVENT, (i + 1) * FORGOTTEN_PER_EVENT),
+          ...(parts > 1 ? { part: i + 1, parts } : {}),
+          at: event.at,
+        });
+      }
     }
   });
 
@@ -197,6 +254,8 @@ export function createEulerChat(options = {}) {
 
     let file;
     if (rel === '/') file = path.join(publicDir, 'index.html');
+    // A window on the open side, and so only where there is one to look at.
+    else if (rel === '/streams' && published) file = path.join(publicDir, 'streams.html');
     else if (rel.startsWith('/public/') || rel.startsWith('/lib/')) {
       file = path.join(projectRoot, rel.slice(1));
     } else {
@@ -415,6 +474,23 @@ export function createEulerChat(options = {}) {
     : null;
   wss.on('close', () => asking?.stop());
 
+  // Made-up people talking, and coming and going: the demo's, and nobody
+  // else's. Never on unless the host asks, and `server/demo.js` is the only
+  // host that does — it refuses to run anywhere that looks like a deployment.
+  // See `server/traffic.js`.
+  const traffic = options.traffic
+    ? startTraffic({
+        world,
+        present: () => sessions.present(),
+        deliver,
+        changed: () => pushDiagrams(),
+        ...(typeof options.traffic === 'object' ? options.traffic : {}),
+      })
+    : null;
+  wss.on('close', () => traffic?.stop());
+  // Said to every page this serves, so it can say so too.
+  const demo = options.demo === true;
+
   /**
    * Platform routers close a connection that carries no data for a while —
    * Heroku's cuts off at 55 seconds — and a quiet room carries none. Without
@@ -535,7 +611,7 @@ export function createEulerChat(options = {}) {
 
     /** Everything a connection needs on finding out who it is. */
     const greet = () => {
-      send(socket, { type: 'welcome', you: you(), maxArity: ROOM_ARITY });
+      send(socket, { type: 'welcome', you: you(), maxArity: ROOM_ARITY, moderator: allowedToModerate(userId, session), demo, streams: published });
       send(socket, { type: 'history', rooms: world.historyFor(userId) });
     };
 
@@ -619,7 +695,8 @@ export function createEulerChat(options = {}) {
       }
       if (!vouched) bind(held, userId);
       send(socket, { type: 'proven', keyId: session.keyId });
-      send(socket, { type: 'welcome', you: you(), maxArity: ROOM_ARITY });
+      // A proven key can make somebody a moderator, so they are told again.
+      send(socket, { type: 'welcome', you: you(), maxArity: ROOM_ARITY, moderator: allowedToModerate(userId, session), demo, streams: published });
     };
 
     greet();
@@ -642,7 +719,7 @@ export function createEulerChat(options = {}) {
       bucket.tokens -= cost;
       return true;
     };
-    const PRICE = { createSubject: 10, atlas: 8, overview: 6, post: 2, search: 1, browse: 1, join: 1, leave: 1, funnel: 2, keys: 3, proof: 3, readers: 2, record: 1, report: 4, concerns: 3, concern: 2, clear: 2, vote: 1, forget: 2, receipts: 4, restore: 6, watch: 2, unwatch: 1, chart: 6, poke: 3 };
+    const PRICE = { createSubject: 10, atlas: 8, overview: 6, post: 2, search: 1, browse: 1, join: 1, leave: 1, funnel: 2, keys: 3, proof: 3, readers: 2, record: 1, report: 4, concerns: 3, concern: 2, clear: 2, vote: 1, forget: 2, receipts: 4, restore: 6, watch: 2, unwatch: 1, chart: 6, poke: 3, branch: 8 };
 
     const hear = (raw) => {
       let msg;
@@ -675,14 +752,34 @@ export function createEulerChat(options = {}) {
 
           case 'identify': {
             world.rename(userId, msg.name);
-            send(socket, { type: 'welcome', you: you(), maxArity: ROOM_ARITY });
+            send(socket, { type: 'welcome', you: you(), maxArity: ROOM_ARITY, demo, streams: published });
             break;
           }
 
           case 'join': {
-            world.join(userId, String(msg.subject));
+            // One interest, or several at once: joining a whole community is
+            // one ask and one redraw rather than a dozen of each. No more at
+            // a time than a person could have picked by hand.
+            const wanted = (Array.isArray(msg.subjects) ? msg.subjects : [msg.subject])
+              .slice(0, JOIN_AT_ONCE)
+              .map((s) => String(s ?? ''))
+              .filter(Boolean);
+            // As many as fit. Joining a community can run into the most
+            // anybody may hold, and the ones that fit are still joined: the
+            // person is told why the rest were not, rather than the whole ask
+            // failing on the last of them.
+            let refused = null;
+            for (const subject of wanted) {
+              try {
+                world.join(userId, subject);
+              } catch (err) {
+                refused = err;
+                break;
+              }
+            }
             send(socket, { type: 'history', rooms: world.historyFor(userId) });
             pushDiagrams();
+            if (refused) send(socket, { type: 'error', message: refused.message });
             break;
           }
 
@@ -950,6 +1047,28 @@ export function createEulerChat(options = {}) {
             break;
           }
 
+          case 'branch': {
+            // The map branched out from one interest into a community; see
+            // `World.branchFor`. Asked again every ten seconds while it is
+            // shown, as the atlas is, and answered the same way: only the
+            // rooms while the drawing in hand is still the drawing.
+            const want = Math.min(ROOM_ARITY, Math.max(2, Number(msg.subjects) || 5));
+            const from = String(msg.from ?? '');
+            const toward = msg.toward == null ? null : String(msg.toward);
+            const view = world.branchFor(userId, from, { toward, limit: want });
+            if (!view) {
+              send(socket, { type: 'branch', none: true, from, toward });
+              break;
+            }
+            for (const room of view.rooms) room.lurkers = lurkers.get(room.key) ?? 0;
+            if (msg.have && msg.have === view.shape) {
+              send(socket, { type: 'branch', only: 'rooms', shape: view.shape, branch: view.branch, rooms: view.rooms });
+            } else {
+              send(socket, { type: 'branch', ...view });
+            }
+            break;
+          }
+
           case 'notifications': {
             const settings = msg.settings
               ? notifications.configure(userId, msg.settings)
@@ -996,6 +1115,8 @@ export function createEulerChat(options = {}) {
               authorKey: session.proven ? session.keyId : null,
             });
             deliver(message);
+            // In the demo, somebody made-up in the room may answer.
+            traffic?.heard(message);
             break;
           }
 

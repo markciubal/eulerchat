@@ -1,8 +1,8 @@
 import { key, parse, receives } from '../lib/regions.js';
-import { blend, cssId, hue, regionFill, stroke } from '../lib/palette.js';
+import { blend, communityColour, cssId, hue, regionFill, stroke } from '../lib/palette.js';
 
 // Re-exported so the browser modules have one import site for colour.
-export { blend, cssId, hue, regionFill, stroke };
+export { blend, communityColour, cssId, hue, regionFill, stroke };
 
 export const NS = 'http://www.w3.org/2000/svg';
 

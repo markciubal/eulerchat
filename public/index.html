@@ -146,9 +146,26 @@
         <path d="M4 12a8 8 0 1 0 2.35-5.65L4 8.7" />
         <path d="M4 4v4.7h4.7" />
       </symbol>
+      <symbol id="icon-pin" viewBox="0 0 24 24">
+        <path d="M9 3.5h6l-1.2 5.5 3.7 3.5H6.5L10.2 9z" />
+        <path d="M12 12.5V20.5" />
+      </symbol>
       <symbol id="icon-poke" viewBox="0 0 24 24">
         <path d="M12 3v3.5M12 17.5V21M3 12h3.5M17.5 12H21M5.6 5.6l2.5 2.5M15.9 15.9l2.5 2.5M5.6 18.4l2.5-2.5M15.9 8.1l2.5-2.5" />
         <circle cx="12" cy="12" r="2" />
+      </symbol>
+      <symbol id="icon-hush" viewBox="0 0 24 24">
+        <path d="M17.5 13.5V10a5.5 5.5 0 0 0-8.1-4.85" />
+        <path d="M6.5 9.2V10c0 4-1.5 5.5-1.5 5.5h11" />
+        <path d="M10.2 19a2 2 0 0 0 3.6 0" />
+        <path d="M4 3.5l16 17" />
+      </symbol>
+      <symbol id="icon-branch" viewBox="0 0 24 24">
+        <circle cx="6" cy="5" r="2" />
+        <circle cx="6" cy="19" r="2" />
+        <circle cx="18" cy="7" r="2" />
+        <path d="M6 7v10" />
+        <path d="M18 9c0 4.5-6.5 4-11.2 8.4" />
       </symbol>
       <symbol id="icon-cube" viewBox="0 0 24 24">
         <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" />
@@ -194,6 +211,11 @@
            of the header — your name, your key, your group — is exactly what a
            lurker does not have. -->
       <span class="lurk-pill" aria-hidden="true">Lurking · just watching</span>
+
+      <!-- Only in the demo (`npm run demo`), where everybody else is made up
+           and says only system messages. Read out, unlike the lurking pill:
+           it is the one thing about the place a newcomer most needs told. -->
+      <span class="demo-pill" title="A demo: everyone else here is made up, and everything they say is a system message. Nothing is kept.">Demo · everyone else is made up</span>
 
       <!-- Wide screens only. On a phone the same dialog is the last button in
            the bar along the bottom, where the thumb already is, and the header
@@ -258,7 +280,7 @@
           <input id="name" type="text" autocomplete="off" spellcheck="false"
                  aria-label="Your name" />
         </label>
-        <span id="key-wrap" class="key-wrap" data-help="key" hidden>
+        <span id="key-wrap" class="key-wrap" hidden>
           <output id="key-mark" class="key"></output>
         </span>
       </div>
@@ -283,8 +305,8 @@
            while talking. The panel follows the button, so the keyboard goes
            from one into the other. -->
       <div class="settings-wrap">
-        <button id="settings-open" type="button" class="bar-button pop-toggle"
-                aria-expanded="false" aria-controls="settings-pop"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-settings" /></svg>Settings</button>
+        <button id="settings-open" type="button" class="bar-button pop-toggle" aria-label="Settings"
+                aria-expanded="false" aria-controls="settings-pop"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-settings" /></svg><span class="bar-button-word">Settings</span></button>
         <div id="settings-pop" class="popout settings-pop" hidden>
           <!-- The theme label from the header, for a header with no room for
                it. Only one of the two is ever shown. -->
@@ -304,38 +326,51 @@
               <button id="bell" type="button" class="bell" title="Desktop alerts for mentions and small rooms">
                 <svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-bell" /></svg><span class="label">Alerts off</span>
               </button>
+              <!-- What the server writes rather than a person: a question to
+                   start a quiet chat, and everything the made-up people of a
+                   demo say. Muted, they are folded away in the room and never
+                   counted as unread; see `hushSystem`. -->
+              <button id="hush-system" type="button" class="bell" aria-pressed="false"
+                      title="Fold away messages written by the server, and stop them counting as unread">
+                <svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-hush" /></svg><span class="label">System messages on</span>
+              </button>
             </div>
           </section>
 
-          <!-- Drag the divider between the panels to resize them, and drag
-               the map out of its side to have it as a window. Everything a
-               drag does is here too, for anybody not dragging, and all of it
-               is remembered by this browser. Only where the panels sit side
-               by side: on a phone they take turns, and there is nothing to
-               lay out. -->
-          <section class="settings settings-layout">
-            <h3 data-help="layout">Layout</h3>
-            <div class="settings-row">
-              <button id="swap-sides" type="button" aria-pressed="false"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-swap" /></svg>Swap sides</button>
-              <button id="float-map" type="button" aria-pressed="false"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-popout" /></svg>Pop out map</button>
-              <button id="reset-layout" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-reset" /></svg>Reset</button>
-            </div>
-          </section>
-
-          <!-- Checks the server's record of what it deleted against what this
-               browser deleted and kept, encrypted messages included. -->
+          <!-- What becomes of what you send: whether this browser keeps its own
+               copy, and a check of the server's record of what it deleted
+               against what this browser deleted and kept, encrypted messages
+               included. Keeping a copy is set once and left, so it lives here
+               rather than beside the box every message is typed into. `for`
+               and `aria-label` as on Encrypt: the help button is added inside
+               whatever carries `data-help`. -->
           <section class="settings">
-            <h3 data-help="deletion">Deletion record</h3>
-            <div class="settings-row">
-              <button id="check-deletions" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-shield" /></svg>Check</button>
+            <h3>Your messages</h3>
+            <label class="settings-check privacy" for="recording" data-help="recording">
+              <input type="checkbox" id="recording" aria-label="Keep a copy of what I send" /> Keep a copy of what I send
+            </label>
+            <div class="settings-row" data-help="deletion">
+              <button id="check-deletions" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-shield" /></svg>Check the deletion record</button>
             </div>
             <p id="deletion-status" class="settings-note" role="status"></p>
+          </section>
+
+          <!-- What the rest of the world can read from here: the firehose
+               live, and the dumps it leaves a megabyte at a time. Only where
+               the server publishes them, which it says when you arrive. -->
+          <section id="open-data" class="settings" hidden>
+            <h3>Open data</h3>
+            <div class="settings-row">
+              <a id="streams-open" class="settings-link" href="streams" target="_blank" rel="noopener"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-popout" /></svg>Watch the firehose</a>
+            </div>
+            <p class="settings-note">Everything said here in the clear, as anybody can read it: live,
+              and in public dumps of up to a megabyte.</p>
           </section>
 
           <!-- Who you have stopped seeing, and the way to see them again. Kept
                in this browser: the server is never told, and nor are they. -->
           <section class="settings">
-            <h3 data-help="muting">Muted</h3>
+            <h3 data-help="muting">Muting and reporting</h3>
             <ul id="muted-list" class="muted-list" aria-label="Muted people"></ul>
             <p id="muted-none" class="settings-note">Nobody. Choose mute on a message to stop
               seeing what someone says.</p>
@@ -343,13 +378,26 @@
               <input type="checkbox" id="offer-mute" checked />
               Offer to mute people who use profanity
             </label>
+            <!-- Reporting's explanation lives here, beside muting, the other
+                 thing to do about somebody, rather than as a lone (i) under
+                 every chat's name. -->
+            <p class="settings-note" data-help="reporting">Report a message with the report link beside it.</p>
+          </section>
+
+          <!-- For somebody whose key the host trusts to moderate, and nobody
+               else: the server says so when the key is shown. -->
+          <section id="moderation" class="settings" hidden>
+            <h3>Moderation</h3>
+            <div class="settings-row">
+              <button id="reports-open" type="button" aria-haspopup="dialog" aria-controls="reports"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-shield" /></svg>Reports <span id="reports-count" class="map-count"></span></button>
+            </div>
           </section>
 
           <!-- Starting again as somebody else. In here rather than beside the
                name, because it cannot be undone and the name field is the
                thing in the header most often clicked. -->
           <section id="key-settings" class="settings" hidden>
-            <h3>Your key</h3>
+            <h3 data-help="key">Your key</h3>
             <div class="settings-row">
               <button id="new-key" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-key" /></svg>New key</button>
             </div>
@@ -361,9 +409,13 @@
     </header>
 
     <main>
-      <section class="room" aria-label="Conversation">
-        <div class="room-head" data-help="reporting">
-          <h2 id="room-title">Pick a conversation</h2>
+      <section class="room" aria-label="Chat">
+        <div class="room-head">
+          <!-- On a phone the list of chats is on the map's side, and a chat
+               is a screen of its own: this is the way back to the list, with
+               what is waiting in it. Hidden where both are on screen. -->
+          <button id="room-list" type="button" class="bar-button room-list"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-list" /></svg>Chats<span id="room-list-waiting" class="tab-badge" hidden></span></button>
+          <h2 id="room-title">Pick a chat</h2>
           <p id="room-meta" class="meta"></p>
 
           <!-- A code for this conversation, for somebody across the room to
@@ -371,10 +423,10 @@
                conversation is open, and never for a portal, which is not for
                finding. -->
           <div class="room-share-wrap">
-            <!-- Poke the server: a question from its databank, for this room,
-                 shown to whoever pressed it and nobody else. See `poked`. -->
-            <button id="poke" type="button" class="bar-button" hidden aria-label="Poke the server"
-                    title="Get a question for this conversation from the server's databank"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-poke" /></svg><span class="label">Poke the server</span></button>
+            <!-- Pinned chats come first in Chats. Kept in this browser; the
+                 server is never told what anybody pinned. -->
+            <button id="room-pin" type="button" class="bar-button" aria-pressed="false" hidden
+                    title="Keep this chat at the top of Chats"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-pin" /></svg><span class="label">Pin</span></button>
             <button id="room-share" type="button" class="bar-button pop-toggle"
                     aria-expanded="false" aria-controls="room-share-pop" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-qr" /></svg>Quick join</button>
             <div id="room-share-pop" class="popout room-share-pop" hidden>
@@ -384,7 +436,7 @@
                 never as who, and with nothing kept on their device, until they
                 choose to join in.</p>
               <div id="room-share-qr" class="cluster-qr" role="img"
-                   aria-label="QR code to quick-join this conversation"></div>
+                   aria-label="QR code to quick-join this chat"></div>
               <div class="group-actions">
                 <button id="room-share-send" type="button" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-share" /></svg>Share</button>
                 <button id="room-share-copy" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-copy" /></svg><span class="label">Copy link</span></button>
@@ -402,9 +454,8 @@
         <p id="said" class="offscreen" aria-live="polite" aria-atomic="true"></p>
 
         <p class="public-note" data-help="open">
-          <strong>Everyone can read this.</strong>
-          Unencrypted messages are public, and anyone can read the whole conversation.
-          Tick <em>Encrypt</em> below to limit a message to the people here.
+          <span id="public-note-text"><strong>Everyone can read this.</strong>
+          Tick <em>Encrypt</em> to limit a message to the people here.</span>
         </p>
 
         <!-- What the server said when poked. Out of the log, which is built
@@ -428,7 +479,8 @@
              (nobody), what is kept (nothing), and the two ways out, each of
              which is somebody deciding to be here. -->
         <div id="lurk-bar" class="lurk-bar" hidden>
-          <p data-help="lurk"><strong>You are lurking.</strong> The conversation
+          <p id="lurk-adds" class="lurk-adds"></p>
+          <p data-help="lurk"><strong>You are lurking.</strong> The chat
             sees how many are lurking, never who, and nothing is saved on this device.</p>
           <div class="lurk-actions">
             <button id="lurk-join" type="button" class="join-here"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-enter" /></svg>Join in</button>
@@ -443,20 +495,22 @@
              descendant — so without `for` the button became the control, and
              without `aria-label` the checkbox took the button's text into its
              own name. -->
-        <div class="choices">
+        <div class="choices" hidden>
           <label class="privacy" for="sealed" data-help="privacy">
             <input type="checkbox" id="sealed" aria-label="Encrypt this message" /> Encrypt
           </label>
-          <label class="privacy" for="recording" data-help="recording">
-            <input type="checkbox" id="recording" aria-label="Keep my own copy" /> Keep my copy
-          </label>
+          <!-- Poke the server: a question from its databank, for this chat,
+               shown just above this row to whoever pressed it and nobody
+               else, and put in the box below by Use it. See `poked`. -->
+          <button id="poke" type="button" class="bar-button" hidden aria-label="Poke the server"
+                  title="Get a question for this chat from the server's databank"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-poke" /></svg><span class="label">Poke the server</span></button>
         </div>
 
         <form id="composer" class="composer">
           <input
             id="body"
             type="text"
-            placeholder="Pick a conversation first"
+            placeholder="Pick a chat first"
             autocomplete="off"
             disabled
           />
@@ -468,7 +522,7 @@
         <p id="notice" class="notice" role="status"></p>
         <!-- Same as the minimap caption: this is cleared on every room render,
              which took the help button with it the moment you entered a room. -->
-        <p class="composer-help" data-help="composer"><span id="composer-help"></span></p>
+        <p class="composer-help"><span id="composer-help"></span></p>
       </section>
     </main>
 
@@ -478,7 +532,7 @@
          the arrow keys move it for anyone not dragging. -->
     <div id="split-col" class="splitter splitter-col" role="separator"
          tabindex="0" aria-orientation="vertical"
-         aria-label="Conversation width" aria-valuemin="20" aria-valuemax="70"></div>
+         aria-label="Chat width" aria-valuemin="20" aria-valuemax="70"></div>
 
     <!-- The drawing is the whole panel, and everything else floats on it.
          What used to be stacked round it — the list of conversations, the
@@ -486,7 +540,7 @@
          is not squeezed by the things that describe it. Each button sits
          straight before its panel, so the keyboard goes from one into the
          other. -->
-    <section class="map" aria-label="Map of subjects">
+    <section class="map" aria-label="Map of interests">
       <!-- The map as a window of its own. It starts docked down one side, and
            this bar is what it wears once it has been pulled out: the part you
            move it by, and the two ways back. Dragging it to either side of
@@ -508,14 +562,14 @@
       <div class="map-float map-float-left">
         <button id="rooms-open" type="button" class="map-button pop-toggle"
                 aria-expanded="false" aria-controls="rooms-pop">
-          <svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-list" /></svg>Conversations <span id="rooms-total" class="map-count"></span>
+          <svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-list" /></svg>Chats
           <span id="rooms-waiting" class="tab-badge" hidden></span>
         </button>
         <button id="explore-open-map" type="button" class="map-button explore-open"
-                aria-label="Explore all interests"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-compass" /></svg><span class="map-button-word">Explore all interests</span></button>
+                aria-label="Explore interests"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-compass" /></svg><span class="map-button-word">Explore<span class="word-more"> interests</span></span></button>
       </div>
       <div id="rooms-pop" class="popout popout-left" hidden>
-        <h3 id="rooms-head" class="popout-head" data-help="rooms">Conversations</h3>
+        <h3 id="rooms-head" class="popout-head">Chats <span id="rooms-total" class="map-count"></span></h3>
         <ul id="rooms" class="rooms" aria-labelledby="rooms-head"></ul>
       </div>
 
@@ -526,13 +580,15 @@
         <!-- The words on these two give way when the map is too narrow for
              them, so each is named as well as worded: a name that was only
              the word would go when the word did. -->
-        <button id="map-popout" type="button" class="map-button map-popout" aria-label="Pop out" title="Pop the map out as a window. Drag to pull it out."><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-popout" /></svg><span class="map-button-word">Pop out</span></button>
-        <button id="map-expand" type="button" class="map-button" aria-label="Expand" title="Show the map full size"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-expand" /></svg><span class="map-button-word">Expand</span></button>
-        <button id="view-open" type="button" class="map-button pop-toggle"
-                aria-expanded="false" aria-controls="view-pop"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-eye" /></svg>View</button>
+        <button id="map-popout" type="button" class="map-button map-popout" aria-label="Pop out" title="Pop the map out as a window. Drag to pull it out."><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-popout" /></svg></button>
+        <!-- Expand and View are their marks alone: named for anybody
+             listening, and on hover for anybody pointing. -->
+        <button id="map-expand" type="button" class="map-button map-button-bare" aria-label="Expand" title="Enlarge map"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-expand" /></svg></button>
+        <button id="view-open" type="button" class="map-button map-button-bare pop-toggle" aria-label="View" title="How the map is shown"
+                aria-expanded="false" aria-controls="view-pop"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-eye" /></svg></button>
       </div>
       <div id="view-pop" class="popout popout-right" hidden>
-        <h3 class="popout-head" data-help="atlas">Map view</h3>
+        <h3 class="popout-head">Map view</h3>
         <div class="popout-row">
           <!-- Not an `output`: that is a live region, and this is rewritten on
                every frame of a drag, which read the zoom level aloud
@@ -543,19 +599,19 @@
         <!-- Rooms standing as tall as they are lively, or the flat map. One
              setting for the map and for All interests, kept in this browser. -->
         <div class="popout-row relief-row">
-          <span data-help="relief">Relief</span>
+          <span data-help="relief">Heights</span>
           <button id="relief" type="button" aria-pressed="true"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-cube" /></svg>3D</button>
           <button id="turn-left" type="button" aria-label="Turn the map left" title="Turn left"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-turn-left" /></svg></button>
           <button id="turn-right" type="button" aria-label="Turn the map right" title="Turn right"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-turn-right" /></svg></button>
         </div>
         <label id="atlas-size" class="atlas-size" for="subject-count">
-          <span data-help="subjects">Subjects shown</span>
+          <span data-help="subjects">Interests on the map</span>
           <input type="range" id="subject-count" min="3" max="10" value="5"
-                 aria-label="Subjects shown" />
+                 aria-label="Interests on the map" />
           <output id="subject-count-out">5</output>
         </label>
         <figure id="minimap-wrap" class="minimap" hidden>
-          <svg id="minimap" role="img" aria-label="All subjects, with yours framed"></svg>
+          <svg id="minimap" role="img" aria-label="All interests, with yours framed"></svg>
           <!-- The caption's text is rewritten on every overview frame, and the
                help button lives inside whatever it is attached to — so
                attaching it here meant it was deleted a second after load. The
@@ -566,12 +622,27 @@
              hidden until there is an overview to draw: every interest there is
              can be explored before anybody holds any of them. -->
         <div class="popout-row popout-explore">
-          <button id="explore-open" type="button" class="explore-open"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-compass" /></svg>Explore all interests</button>
+          <button id="explore-open" type="button" class="explore-open"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-compass" /></svg>Explore interests</button>
         </div>
+        <!-- Where the map sits, beside how it is drawn. Drag the divider
+             between the panels to resize them, and drag the map out of its
+             side to have it as a window. Everything a drag does is here too,
+             for anybody not dragging, and all of it is remembered by this
+             browser. Only where the panels sit side by side: on a phone they
+             take turns, and there is nothing to lay out. -->
+        <section class="settings settings-layout">
+          <h3 data-help="layout">Layout</h3>
+          <div class="settings-row">
+            <button id="swap-sides" type="button" aria-pressed="false"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-swap" /></svg>Swap sides</button>
+            <button id="float-map" type="button" aria-pressed="false"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-popout" /></svg>Pop out map</button>
+            <button id="reset-layout" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-reset" /></svg>Reset</button>
+          </div>
+        </section>
+
         <!-- The note along the bottom of the map, back again for anyone who
              closed it, or who has joined something and so never sees it. -->
         <div class="popout-row popout-foot">
-          <button id="tip-show" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-note" /></svg>View note</button>
+          <button id="tip-show" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-note" /></svg>How this works</button>
         </div>
       </div>
 
@@ -582,13 +653,26 @@
            screen and in the bar along the bottom on a phone. -->
       <div class="map-foot">
         <div id="lede" class="lede">
-          <p id="lede-text">Pick what you are interested in from Interests. Where your
-            interests overlap with someone else’s, that is a conversation. Open one on the
-            map or from Conversations.</p>
+          <div class="lede-body">
+            <p id="lede-text">Pick what you are interested in from Interests. Where your
+              interests overlap with other people’s, there is a chat. Open one on the
+              map or from Chats.</p>
+            <!-- The first thing to do, as a button where the note says to do it. -->
+            <button type="button" class="interests-open join-here lede-go">Choose interests</button>
+          </div>
           <!-- Described by the note, so landing on it from "View note" reads
                the note out and not only the word Close. -->
           <button id="lede-close" type="button" class="lede-close"
                   aria-label="Close this note" aria-describedby="lede-text"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-close" /></svg>Close</button>
+        </div>
+        <!-- Branched out into a community: what the map is showing instead of
+             their own, and the way back. See `branchOut`. -->
+        <div id="branch-bar" class="branch-bar" role="status" hidden>
+          <svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-branch" /></svg>
+          <p class="branch-words"><strong id="branch-what"></strong> <span id="branch-size"></span></p>
+          <button id="branch-join-all" type="button" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-enter" /></svg><span class="label">Join all</span></button>
+          <button id="branch-join-some" type="button" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-list" /></svg>Join some</button>
+          <button id="branch-back" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-map" /></svg>Back to my map</button>
         </div>
         <div class="fit-row" data-help="fit"><p id="fit" class="fit"></p></div>
       </div>
@@ -598,14 +682,14 @@
            whatever the geometry did, so the name says so rather than
            leaving the equivalence to be discovered. -->
       <svg id="diagram" role="img" aria-describedby="fit"
-           aria-label="A map of the subjects in view. Where subjects overlap there is a conversation. Every conversation on this map is also listed under the Conversations button."></svg>
+           aria-label="A map of the interests in view. Where interests overlap there is a chat. Every chat on this map is also listed under the Chats button."></svg>
     </section>
 
     <!-- Where the map will land. Shown while the window is being dragged near
          enough to a side that letting go would dock it there. -->
     <div id="dock-hint" class="dock-hint" aria-hidden="true" hidden></div>
 
-    <!-- A little of what "Explore all interests" opens, played while a
+    <!-- A little of what "Explore interests" opens, played while a
          pointer rests on either of those buttons; see `public/peek.js`. Hidden
          from a screen reader, since the button's name already says all it
          does, and it never takes the pointer. -->
@@ -648,25 +732,8 @@
         <button id="interests-close" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-close" /></svg>Close</button>
       </div>
       <div class="interests-body">
-        <label class="funnel" for="funnel">
-          <span data-help="funnel">Also join</span>
-          <select id="funnel" aria-label="Also join">
-            <option value="0">Nothing else</option>
-            <option value="1">Its field</option>
-            <option value="2">Its field and division</option>
-          </select>
-        </label>
-        <!-- Every interest there is, under the division it belongs to and
-             indented by where it sits beneath it; picking one joins it. A
-             native list, so every browser and screen reader already knows how
-             to open it and search it by typing. See public/catalogue.js. -->
-        <label class="funnel catalogue-pick" for="add-interest">
-          <span data-help="catalogue">Add from the list</span>
-          <select id="add-interest" aria-label="Add an interest from the list" disabled>
-            <option value="">Loading the list…</option>
-          </select>
-        </label>
-        <p id="add-said" class="add-said" aria-live="polite"></p>
+        <!-- Search first: it is how most people find what they came for,
+             and it is where the keyboard lands when this opens. -->
         <form id="find" class="new-subject" role="search">
           <input
             id="subject-name"
@@ -677,10 +744,66 @@
             maxlength="31"
             aria-label="Search interests"
           />
-          <button id="create" type="submit" aria-label="Create this interest"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-plus" /></svg></button>
+          <button id="create" type="submit" aria-label="Create this interest"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-plus" /></svg>Create</button>
         </form>
+        <!-- Every interest there is, under the division it belongs to and
+             indented by where it sits beneath it; picking one joins it. A
+             native list, so every browser and screen reader already knows how
+             to open it and search it by typing. See public/catalogue.js. -->
+        <label class="funnel catalogue-pick" for="add-interest">
+          <span>Pick from the full list</span>
+          <select id="add-interest" aria-label="Add an interest from the list" disabled>
+            <option value="">Loading the list…</option>
+          </select>
+        </label>
+        <p id="add-said" class="add-said" aria-live="polite"></p>
         <p id="rail-total" class="rail-total"></p>
         <ul id="subjects" class="subjects"></ul>
+        <!-- Set once, if ever: folded away at the foot rather than the first
+             thing somebody new meets. -->
+        <details id="join-options" class="join-options">
+          <summary>Joining options</summary>
+          <label class="funnel" for="funnel">
+            <span data-help="funnel">When I join, also join</span>
+            <select id="funnel" aria-label="When I join, also join">
+              <option value="0">Nothing else</option>
+              <option value="1">Its field</option>
+              <option value="2">Its field and division</option>
+            </select>
+          </label>
+        </details>
+      </div>
+    </dialog>
+
+    <!-- What has been reported, for a moderator: which chats, how often and
+         why, busiest concern first. A look is a lurk, in a tab of its own, so
+         the moderator is never counted as a member of what they check. -->
+    <!-- Some of a community, not all of it: a switch for each interest, on
+         for the ones that would be joined. The ones already held are on and
+         cannot be switched off here — leaving an interest is done where
+         leaving is done. See `openJoinSome`. -->
+    <dialog id="join-some" class="interests-modal" aria-labelledby="join-some-title">
+      <div class="map-modal-bar">
+        <strong id="join-some-title">Join some</strong>
+        <button id="join-some-close" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-close" /></svg>Close</button>
+      </div>
+      <div class="interests-body">
+        <p id="join-some-say" class="rail-total"></p>
+        <ul id="join-some-list" class="switch-list"></ul>
+      </div>
+      <div class="join-some-foot">
+        <button id="join-some-go" type="button" class="join-here"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-enter" /></svg><span id="join-some-count">Join</span></button>
+      </div>
+    </dialog>
+
+    <dialog id="reports" class="interests-modal" aria-labelledby="reports-title">
+      <div class="map-modal-bar">
+        <strong id="reports-title">Reports</strong>
+        <button id="reports-close" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-close" /></svg>Close</button>
+      </div>
+      <div class="interests-body">
+        <p id="reports-none" class="rail-total">Nothing reported.</p>
+        <ul id="reports-list" class="reports-list"></ul>
       </div>
     </dialog>
 
@@ -733,6 +856,7 @@
             <button id="explorer-turn-left" type="button" aria-label="Turn left" title="Turn left"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-turn-left" /></svg></button>
             <button id="explorer-turn-right" type="button" aria-label="Turn right" title="Turn right"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-turn-right" /></svg></button>
             <button id="explorer-relief" type="button" aria-pressed="true" aria-label="3D" title="3D"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-cube" /></svg></button>
+          <button id="explorer-tint" type="button" aria-pressed="false" aria-label="Colour by community" title="Colour by community"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-branch" /></svg></button>
           </div>
         </div>
         <div class="explorer-side">
@@ -743,6 +867,23 @@
             Names appear as you get closer. Lines join interests people hold together. Pick a dot to
             see what it is.
           </p>
+          <!-- Coloured by community, the communities themselves: what the
+               colours mean, and what can be done with one. See
+               `lib/communities.js`. -->
+          <section id="explorer-communities" class="explorer-communities" aria-labelledby="communities-head" hidden>
+            <h3 id="communities-head">Communities</h3>
+            <p class="explorer-hint">Interests the same people hold together, biggest first. Pick one to light it up.</p>
+            <ul id="community-list" class="community-list" aria-labelledby="communities-head"></ul>
+            <div id="community-actions" class="community-actions" hidden>
+              <strong id="community-picked"></strong>
+              <span id="community-held" class="community-held"></span>
+              <div class="community-buttons">
+                <button id="community-branch" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-branch" /></svg>Branch out</button>
+                <button id="community-join-all" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-enter" /></svg>Join all</button>
+                <button id="community-join-some" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-list" /></svg>Join some</button>
+              </div>
+            </div>
+          </section>
           <section id="explorer-pick" class="explorer-pick" aria-labelledby="explorer-name" hidden>
             <h3 id="explorer-name"></h3>
             <p id="explorer-path" class="explorer-path"></p>
@@ -775,7 +916,7 @@
       <div class="map-modal-bar">
         <!-- The help hangs off the wrapper, so its button is not read out as
              part of the sheet's name. -->
-        <span data-help="appearance"><strong id="appearance-title">Theme</strong></span>
+        <span><strong id="appearance-title">Theme</strong></span>
         <button id="appearance-close" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-close" /></svg>Close</button>
       </div>
       <div class="appearance-body">

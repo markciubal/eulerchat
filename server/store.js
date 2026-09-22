@@ -38,6 +38,7 @@ import { commitmentInput, entryInput } from '../lib/receipt.js';
 import { watchable } from '../lib/lurk.js';
 import { activity } from '../lib/activity.js';
 import { associations } from '../lib/association.js';
+import { communities as findCommunities } from '../lib/communities.js';
 import { isPortalRoom } from '../lib/portal.js';
 import { createHash } from 'node:crypto';
 import { MemoryLedger, isLedger } from './ledger.js';
@@ -50,6 +51,18 @@ const sha = (text) => createHash('sha256').update(String(text)).digest('hex');
 
 /** Computed once: where subjects sit before anybody has joined them. */
 const EXTENT = 1000;
+
+/** How many of somebody's chats not drawn on their map are listed beside it. */
+const OFF_MAP_KEPT = 100;
+
+/** How many communities nearest its own a map offers to branch into. */
+const NEAR_OFFERED = 2;
+
+/** How many of a community's interests are named for joining; see `branchFor`. */
+const COMMUNITY_OFFERED = 40;
+
+/** A community as a map offers it: what it is called, and how big it is. */
+const briefly = (c) => ({ lead: c.lead, name: c.name, size: c.members.length });
 const HIERARCHY = radialLayout(knowledge, { extent: EXTENT });
 
 /**
@@ -1052,11 +1065,147 @@ export class World {
       allowed: scopedTo(groupIn(held)),
       first: groupFirst(groupIn(held)),
     });
+    const group = groupIn(held);
+    const { view, shape, rooms, room } = this.#drawn(subjects, held, group);
+
+    // The group's own conversation, whether or not it has ground of its own.
+    // It wraps the group, so as soon as everybody in it holds something else
+    // too, nobody holds it alone and it has no patch of the map to be opened
+    // from — and the one room the whole group can talk in would vanish from
+    // the list of rooms exactly when the group got going.
+    const own = group ? groupRoom(group) : null;
+    if (own && !rooms.some((r) => r.key === own)) rooms.push(room(own, [own], 0));
+
+    // Every other chat they are in, drawn on this map or not. Holding more
+    // interests than the map draws left some of somebody's own chats with no
+    // way in at all; these are listed beside the map, flagged, since they
+    // have no ground on it to be found on. The busiest hundred, so a person
+    // holding thirty interests is not sent five thousand.
+    const drawn = new Set(rooms.map((r) => r.key));
+    const theirs = [];
+    for (const region of subsets([...held], MAX_ARITY)) {
+      // Joined by hand: `key` in here is the drawing's, not the room's.
+      const k = canonical(region).join('+');
+      // With somebody else in it: a chat of one is not a chat.
+      if (!drawn.has(k) && (counts.get(k) ?? 0) > 1) theirs.push({ ...room(k, region, 0), offMap: true });
+    }
+    theirs.sort((a, b) => b.activity - a.activity || b.population - a.population || (a.key < b.key ? -1 : 1));
+    rooms.push(...theirs.slice(0, OFF_MAP_KEPT));
+
+    // How busy each room is, and whether they are in it, afresh every time:
+    // those are what change between one ask and the next.
+    return { ...view, shape, subscription: [...held].sort(), rooms, communities: this.#communitiesOf(subjects) };
+  }
+
+  /**
+   * The map branched out from one interest into a community: the interest,
+   * and the community's interests most linked with it, drawn as the atlas
+   * draws anything. Somebody's own map says where they are; this says where
+   * they could go from there, and what they would find, before they go.
+   *
+   * `toward` names another community by any interest in it — one of those
+   * nearest `from`'s own — and then it is that community's interests most
+   * linked with `from`'s that are drawn beside `from`: the ones that bridge
+   * the two. Without it, `from`'s own community.
+   *
+   * Nothing is joined. Their own rooms in it are theirs as always, and the
+   * rest are drawn as rooms they are not in yet, to open, look in on and join
+   * like any other. The open world only: a community is read off links, and
+   * nothing inside a group is ever linked.
+   *
+   * @returns {object | null}  an atlas with `branch` saying what it is, or null
+   *   where there is nothing to branch into
+   */
+  branchFor(userId, from, { toward = null, limit = 5 } = {}) {
+    const start = String(from ?? '');
+    const aim = toward == null ? start : String(toward);
+    if (!this.subjects.has(start) || clusterOf(start) !== null || clusterOf(aim) !== null) return null;
+    const { list, of } = this.communities();
+    const target = of.get(aim);
+    if (target === undefined) return null;
+
+    // What the branch grows from: the interest, or, into a community next to
+    // its own, the whole of its own.
+    const home = of.get(start);
+    const origin = home !== undefined && home !== target ? new Set(list[home].members) : new Set([start]);
+    const pull = new Map();
+    for (const [a, b, , share] of this._communities.links) {
+      if (origin.has(a) && of.get(b) === target) pull.set(b, (pull.get(b) ?? 0) + share);
+      if (origin.has(b) && of.get(a) === target) pull.set(a, (pull.get(a) ?? 0) + share);
+    }
+    const { population } = this.index();
+    const chosen = list[target].members
+      .filter((s) => s !== start)
+      .sort(
+        (a, b) =>
+          (pull.get(b) ?? 0) - (pull.get(a) ?? 0) ||
+          (population.get(b) ?? 0) - (population.get(a) ?? 0) ||
+          (a < b ? -1 : 1),
+      )
+      .slice(0, Math.max(1, limit - 1));
+    const subjects = [start, ...chosen];
+
+    const held = this.subscription(userId);
+    const { view, shape, rooms } = this.#drawn(subjects, held, null);
+    return {
+      ...view,
+      shape,
+      subscription: [...held].sort(),
+      rooms,
+      communities: this.#communitiesOf(subjects),
+      branch: {
+        from: start,
+        toward: toward == null ? null : aim,
+        // With everything in it, not only what is drawn: what is offered to
+        // be joined is the community, and the map can only draw a handful.
+        community: { ...briefly(list[target]), members: list[target].members.slice(0, COMMUNITY_OFFERED) },
+      },
+    };
+  }
+
+  /**
+   * Communities of interests, read off the links; see `lib/communities.js`.
+   * Worked out again only when who holds what changes, as the chart is.
+   */
+  communities() {
+    const counts = this.census();
+    const cached = this._communities;
+    if (cached?.census === counts && cached.changes === this._changes && cached.subjects === this.subjects.size) {
+      return cached.value;
+    }
+    // The open world only, as for everything else on the sheet.
+    const links = associations(counts, { open: (s) => clusterOf(s) === null });
+    const value = findCommunities(links, this.index().population);
+    this._communities = { census: counts, changes: this._changes, subjects: this.subjects.size, links, value };
+    return value;
+  }
+
+  /**
+   * The community each of some interests is in, and the ones nearest it, for
+   * a map to offer branching into. Only those in one.
+   */
+  #communitiesOf(subjects) {
+    const { list, of } = this.communities();
+    const out = {};
+    for (const s of subjects) {
+      const i = of.get(s);
+      if (i === undefined) continue;
+      out[s] = { ...briefly(list[i]), near: list[i].near.slice(0, NEAR_OFFERED).map((j) => briefly(list[j])) };
+    }
+    return out;
+  }
+
+  /**
+   * Some subjects drawn: the shapes, and a room for each patch of them.
+   *
+   * @returns {{view: object, shape: string, rooms: object[], room: Function}}  `room`
+   *   makes a room like the others, for one with no patch of its own
+   */
+  #drawn(subjects, held, group) {
     // Anchored to the knowledge hierarchy, so the map keeps its shape as people
     // come and go instead of rearranging itself around whoever is here now.
     // Inside a group each subject is anchored where its outside twin is, so
     // the group is drawn as the same map with its own people on it.
-    const group = groupIn(held);
     const regions = zones([...this.members.values()], subjects);
 
     // The drawing is a function of nothing but which subjects are in it, how
@@ -1104,18 +1253,7 @@ export class World {
     });
     const lively = this.activity();
     const rooms = view.zones.map((zone) => room(zone.key, zone.subjects, zone.population));
-
-    // The group's own conversation, whether or not it has ground of its own.
-    // It wraps the group, so as soon as everybody in it holds something else
-    // too, nobody holds it alone and it has no patch of the map to be opened
-    // from — and the one room the whole group can talk in would vanish from
-    // the list of rooms exactly when the group got going.
-    const own = group ? groupRoom(group) : null;
-    if (own && !rooms.some((r) => r.key === own)) rooms.push(room(own, [own], 0));
-
-    // How busy each room is, and whether they are in it, afresh every time:
-    // those are what change between one ask and the next.
-    return { ...view, shape, subscription: [...held].sort(), rooms };
+    return { view, shape, rooms, room };
   }
 
   /**
@@ -1265,11 +1403,18 @@ export class World {
     }
 
     // Which of them people hold together; see `lib/association.js`. The open
-    // world only, as for everything else on the sheet.
-    const links = associations(counts, { open: (s) => clusterOf(s) === null });
+    // world only, as for everything else on the sheet. And the communities
+    // those make, each interest marked with the one it is in.
+    const { list, of } = this.communities();
+    const { links } = this._communities;
+    for (const subject of placed) {
+      const c = of.get(subject.id);
+      if (c !== undefined) subject.c = c;
+    }
+    const found = list.map((c) => ({ name: c.name, size: c.members.length, near: c.near.slice(0, NEAR_OFFERED) }));
 
     const shape = createHash('sha1').update(JSON.stringify([placed, labels, links, EXTENT])).digest('hex').slice(0, 16);
-    return { subjects: placed, labels, links, extent: EXTENT, shape };
+    return { subjects: placed, labels, links, communities: found, extent: EXTENT, shape };
   }
 
   /**
@@ -1699,6 +1844,17 @@ export class World {
     entry.hash = sha(entryInput(entry));
     this.deletions.push(entry);
     this.#record({ kind: 'delete', receipt: entry });
+    // Said to whoever keeps copies on the place's behalf, so that they forget
+    // too: the open side's dumps, which must not outlive what is in them.
+    // Each with its commitment, for telling the world by that rather than by
+    // its id.
+    this.#announce({
+      type: 'forgotten',
+      reason,
+      seq: entry.seq,
+      hash: entry.hash,
+      messages: messages.map((m, i) => ({ id: m.id, room: m.room, commitment: entry.commitments[i] })),
+    });
     return entry;
   }
 

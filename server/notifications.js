@@ -129,9 +129,14 @@ export class Notifications {
       });
       if (!note) continue;
 
-      const counts = this.unread.get(userId) ?? new Map();
-      counts.set(note.room, (counts.get(note.room) ?? 0) + 1);
-      this.unread.set(userId, counts);
+      // Unread is messages waiting: a room coming into being is news, but it
+      // is not something to read, and counting it filled the badge with
+      // rooms a join had just made that had nothing in them at all.
+      if (note.kind === 'message' || note.kind === 'mention') {
+        const counts = this.unread.get(userId) ?? new Map();
+        counts.set(note.room, (counts.get(note.room) ?? 0) + 1);
+        this.unread.set(userId, counts);
+      }
 
       if (RANK[note.level] <= RANK[QUIET]) continue;
 

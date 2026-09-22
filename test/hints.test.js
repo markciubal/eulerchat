@@ -107,7 +107,7 @@ test('the page says what it is, where somebody looks first', () => {
   const lede = document.getElementById('lede');
   assert.ok(lede, 'there should be an opening instruction');
   assert.match(lede.textContent, /interested in/);
-  assert.match(lede.textContent, /conversation/);
+  assert.match(lede.textContent, /chat/);
 
   // And it sits above the drawing rather than across the page from it.
   const main = document.querySelector('.map').innerHTML;

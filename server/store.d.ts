@@ -133,7 +133,22 @@ export interface AtlasView extends Atlas {
    * `activity`: how lively it has been lately, 0 to 1 against the liveliest
    * room on the platform — the height the map raises it to. See `activity()`.
    */
-  rooms: Array<Room & { here: number; activity: number }>;
+  rooms: Array<Room & { here: number; activity: number; offMap?: boolean }>;
+  /** The community each drawn interest is in, and the ones nearest it; see `communities()`. */
+  communities: Record<string, Community & { near: Community[] }>;
+}
+
+/** A community as a map offers it: its most-held interest, the few it is named by, and how many are in it. */
+export interface Community {
+  lead: string;
+  name: string[];
+  size: number;
+}
+
+/** The map branched out into a community; see `branchFor`. */
+export interface BranchView extends AtlasView {
+  /** `members` is everything in the community, not only what the map drew of it. */
+  branch: { from: string; toward: string | null; community: Community & { members: string[] } };
 }
 
 /**
@@ -171,6 +186,20 @@ export class World {
   diagramFor(userId: string): DiagramView;
   /** The same, drawn with routed boundaries and more subjects. */
   atlasFor(userId: string, limit?: number): AtlasView;
+  /**
+   * The map branched out from `from` into its community, or with `toward`
+   * into the one that interest is in, drawn beside `from`. Joins nothing.
+   * Null where there is nothing to branch into.
+   */
+  branchFor(userId: string, from: string, options?: { toward?: string | null; limit?: number }): BranchView | null;
+  /**
+   * Interests the same people hold together, grouped; see `lib/communities.js`.
+   * Largest first, each with the others nearest it by index.
+   */
+  communities(): {
+    list: Array<{ lead: string; name: string[]; members: string[]; near: number[] }>;
+    of: Map<string, number>;
+  };
   /**
    * A cheap fingerprint of what their screen would show.
    *
@@ -387,7 +416,15 @@ export class World {
    * fields named at the middle of what they cover. What the explorer draws;
    * asked for when it opens.
    */
-  chart(): { subjects: ChartSubject[]; labels: ChartLabel[]; links: ChartLink[]; extent: number; shape: string };
+  chart(): {
+    subjects: ChartSubject[];
+    labels: ChartLabel[];
+    links: ChartLink[];
+    /** By index, as `ChartSubject.c` names them. */
+    communities: Array<{ name: string[]; size: number; near: number[] }>;
+    extent: number;
+    shape: string;
+  };
   /**
    * How lively each room and each interest has been lately, 0 to 1 against
    * the liveliest on the platform. Every message counts, halving in weight
@@ -432,6 +469,8 @@ export interface ChartSubject {
   known: boolean;
   /** Its field, division and so on, nearest first. The chart only. */
   up?: string[];
+  /** Which of the chart's communities it is in, where it is in one. The chart only. */
+  c?: number;
   /**
    * How lively it has been lately, 0 to 1 against the liveliest interest on
    * the platform: the height of its column. The chart only, and left off

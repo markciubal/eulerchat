@@ -1,19 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
-import { DOUBLE_GAP, gestures } from '../public/gestures.js';
+import { DOUBLE_GAP, HOLD, gestures } from '../public/gestures.js';
 
 /** A drawing to gesture at, and a record of what the gestures asked of it. */
 function setup({ orbits = true, waitForDouble } = {}) {
   const { document } = parseHTML('<!doctype html><html><body><svg id="s"><circle id="dot" /></svg></body></html>');
   const el = document.getElementById('s');
-  const calls = { pan: [], zoom: [], orbit: [], tap: [] };
+  const calls = { pan: [], zoom: [], orbit: [], tap: [], menu: [] };
   const handle = gestures(el, {
     canOrbit: () => orbits,
     pan: (dx, dy) => calls.pan.push([dx, dy]),
     zoom: (factor, x, y) => calls.zoom.push([factor, x, y]),
     orbit: (turn, tilt, anchor) => calls.orbit.push([turn, tilt, anchor]),
     tap: (tap) => calls.tap.push(tap),
+    menu: (at) => calls.menu.push(at),
     waitForDouble,
   });
   const fire = (type, { id = 1, x = 0, y = 0, target = el, ...rest } = {}) => {
@@ -278,4 +279,47 @@ test('flat, a trackpad scrolled with two fingers moves it', () => {
   el.dispatchEvent(evt);
   assert.deepEqual(calls.pan, [[-6, -12]]);
   assert.equal(calls.orbit.length, 0);
+});
+
+test('a right click, a finger held still, or the menu key opens the menu; a right drag only turns it', async () => {
+  const { calls, fire, el, dot, document } = setup();
+  const browsers = () => el.dispatchEvent(new document.defaultView.Event('contextmenu', { bubbles: true, cancelable: true }));
+  drag(fire, [[100, 100], [150, 80]], { button: 2 });
+  assert.equal(calls.menu.length, 0, 'dragged, it turned the map, and that is all');
+
+  fire('pointerdown', { x: 5, y: 6, button: 2, target: dot });
+  fire('pointerup', { x: 5, y: 6, button: 2 });
+  assert.equal(calls.menu.length, 1);
+  assert.equal(calls.menu[0].target, dot, 'for whatever was pressed');
+  assert.deepEqual([calls.menu[0].clientX, calls.menu[0].clientY], [5, 6]);
+  // The browser's word for the same press, which on Windows comes after it.
+  browsers();
+  assert.equal(calls.menu.length, 1, 'is not a second menu');
+
+  // Control and a click, on a Mac.
+  drag(fire, [[7, 7]], { ctrlKey: true });
+  assert.equal(calls.menu.length, 2);
+  assert.equal(calls.tap.length, 0);
+
+  // A finger held still, and then lifted.
+  fire('pointerdown', { id: 3, x: 20, y: 20, pointerType: 'touch', target: dot });
+  await wait(HOLD + 50);
+  assert.equal(calls.menu.length, 3);
+  assert.equal(calls.menu[2].pointerType, 'touch');
+  fire('pointerup', { id: 3, x: 20, y: 20, pointerType: 'touch' });
+  await wait(DOUBLE_GAP + 20);
+  assert.equal(calls.tap.length, 0, 'lifting it is not a tap as well');
+
+  // Held, but moving: moving the map.
+  fire('pointerdown', { id: 4, x: 20, y: 20, pointerType: 'touch' });
+  fire('pointermove', { id: 4, x: 60, y: 20, pointerType: 'touch' });
+  await wait(HOLD + 50);
+  fire('pointerup', { id: 4, x: 60, y: 20, pointerType: 'touch' });
+  assert.equal(calls.menu.length, 3);
+
+  // The keyboard's menu key, with no press about.
+  await wait(650);
+  browsers();
+  assert.equal(calls.menu.length, 4);
+  assert.equal(calls.menu[3].pointerType, 'keyboard');
 });

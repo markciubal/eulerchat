@@ -9,6 +9,7 @@ import { fitTo, pointsOf, renderMinimap } from './minimap.js';
 import { mountExplorer } from './explorer.js';
 import { fillCatalogue, showPrompt } from './catalogue.js';
 import { mountPeek } from './peek.js';
+import { contextMenu } from './menu.js';
 import { attachHelp, busyness, createCard, when } from './hints.js';
 import { available, forgetIdentity, rememberedIdentity, seal, unseal } from '../lib/seal.js';
 import { mark, prove } from '../lib/proof.js';
@@ -109,6 +110,27 @@ const state = {
   chart: null,
   /** What the server said when last poked, and for which room; see `paintPoke`. */
   poked: null,
+  /** Chats the server has already been poked about on their being found empty. */
+  autoPoked: new Set(),
+  /** Chats pinned to the top of the list, kept in this browser; see `PINNED_KEY`. */
+  pinned: new Set(),
+  /** Open the busiest chat when the first map after a first join arrives. */
+  openBusiest: false,
+  /** What the line under the map says; see `says`. */
+  status: '',
+  /** The interests ticked in "Join some"; see `openJoinSome`. */
+  joining: null,
+  /** Whether what the server writes is folded away; see `hushSystem`. */
+  hushSystem: false,
+  /**
+   * The map branched out into a community, drawn in place of their own until
+   * they go back: `{from, toward, view}`, `view` null until it arrives. See
+   * `branchOut`.
+   */
+  branch: null,
+  /** Whether the server trusts this key to moderate, and what it has been told. */
+  moderator: false,
+  concerns: [],
   /**
    * Rooms standing as tall as they are lively, or flat; see `public/relief.js`.
    * `projection` is the view the map was last drawn with, or null when flat,
@@ -303,6 +325,13 @@ function handleFrame(evt) {
   switch (msg.type) {
     case 'welcome':
       state.me = msg.you;
+      state.moderator = msg.moderator === true;
+      $('moderation').hidden = !state.moderator;
+      // The demo says so on every page, since everyone else in it is made up.
+      if (msg.demo === true) document.body.dataset.demo = '';
+      else delete document.body.dataset.demo;
+      // The way to the firehose, where there is one to see.
+      $('open-data').hidden = msg.streams !== true;
       // A lurker leaves nothing on this device, not even which connection it was.
       if (!state.lurking) remember(msg.you.id);
       // Never clobber what someone is in the middle of typing.
@@ -314,6 +343,10 @@ function handleFrame(evt) {
         break;
       }
       bringNameBack();
+      // The server keeps preferences by who somebody is, and a new guest is
+      // somebody new, so what this browser remembers is said on every
+      // connection rather than once; see `hushSystem`.
+      if (state.hushSystem) send({ type: 'notifications', settings: { system: false } });
       // Arriving by a scanned code happens before there is a connection to
       // say so on, so the group's conversation is joined from here — and
       // again if this turns out to be somebody else, which is what happens
@@ -346,6 +379,12 @@ function handleFrame(evt) {
       // Their own change — the first they hear, or holding something else —
       // or somebody else's, which moved only the counts around what they hold.
       const own = !state.diagram || (msg.subscription ?? []).join('|') !== (state.diagram.subscription ?? []).join('|');
+      // Holding nothing and now something: they have just joined their first
+      // interest, and the next map opens the busiest chat it put them in,
+      // rather than leaving them looking at "Pick a chat".
+      if (state.diagram && !(state.diagram.subscription ?? []).length && (msg.subscription ?? []).length) {
+        state.openBusiest = true;
+      }
       state.diagram = msg;
       // A lurker has no map and no interests to keep up to date, so nothing is
       // asked for that would not be shown — least of all a map, the dearest
@@ -366,6 +405,8 @@ function handleFrame(evt) {
       // looked at, and pressed, until the next arrives; see `askForMap`.
       if (own) state.atlas = null;
       askForMap({ now: own });
+      if (own && state.branch) askBranch();
+      renderBranchBar();
       renderRail();
       renderRoom();
       // The catalogue's top level once, and after that whatever level is
@@ -425,7 +466,7 @@ function handleFrame(evt) {
         // scratch on every render, so announcing the list itself re-read every
         // message each time anybody voted on anything. Nothing at all for
         // somebody muted, whose words are folded away on screen too.
-        if (!isMuted(msg.message)) {
+        if (!isMuted(msg.message) && !(state.hushSystem && msg.message.machine)) {
           $('said').textContent = msg.message.machine
             ? `System message, as ${msg.message.author}: ${msg.message.body}`
             : msg.message.sealed
@@ -469,6 +510,12 @@ function handleFrame(evt) {
       }
       state.atlas = view;
       for (const room of view.rooms ?? []) state.lurkers[room.key] = room.lurkers ?? 0;
+      // Branched out, the map is the branch's: their own is kept up to date
+      // for the list of chats beside it, and drawn again when they go back.
+      if (state.branch) {
+        drawAtlas({ repaint: false });
+        break;
+      }
       // The map is drawn again only if what it shows has changed. The server
       // sends a fresh atlas after every change near anybody's interests, and
       // most of those change nothing on this screen; redrawing each time made
@@ -495,6 +542,41 @@ function handleFrame(evt) {
           if (state.atlas) redrawMap(drawnAs(state.atlas));
         }, wait);
       }
+      break;
+    }
+
+    case 'branch': {
+      // The map branched out into a community; see `branchOut`. One for a
+      // branch no longer shown — gone back since, or branched elsewhere — is
+      // let go.
+      const branch = state.branch;
+      const about = msg.branch ?? { from: msg.from, toward: msg.toward ?? null };
+      if (!branch || about.from !== branch.from || (about.toward ?? null) !== branch.toward) break;
+      if (msg.none) {
+        notify(`Nothing to branch into from ${subjectLabel(branch.from)} yet: nobody holds it with anything else.`);
+        leaveBranch();
+        break;
+      }
+      let view = msg;
+      if (msg.only === 'rooms') {
+        if (!branch.view || branch.view.shape !== msg.shape) {
+          askBranch({ whole: true });
+          break;
+        }
+        view = { ...branch.view, rooms: msg.rooms, branch: msg.branch };
+      }
+      const first = !branch.view;
+      branch.view = view;
+      for (const room of view.rooms ?? []) state.lurkers[room.key] = room.lurkers ?? 0;
+      renderBranchBar();
+      const drawn = drawnAs(view);
+      if (drawn === state.drawnAs) {
+        drawAtlas({ repaint: false });
+        break;
+      }
+      state.drawnAs = drawn;
+      state.drewAt = Date.now();
+      drawAtlas({ repaint: true, fit: first });
       break;
     }
 
@@ -554,7 +636,10 @@ function handleFrame(evt) {
       // Somebody muted does not get to badge a room or interrupt either. The
       // message itself still arrives, and is folded away in the log.
       if (mutedNote(msg.notification)) break;
-      state.unread[msg.notification.room] = (state.unread[msg.notification.room] ?? 0) + 1;
+      // Only what there is to read is unread; see `Notifications`.
+      if (msg.notification.kind === 'message' || msg.notification.kind === 'mention') {
+        state.unread[msg.notification.room] = (state.unread[msg.notification.room] ?? 0) + 1;
+      }
       renderRooms();
       announce(msg.notification);
       break;
@@ -616,6 +701,11 @@ function handleFrame(evt) {
       $('recording').checked = msg.on;
       break;
 
+    case 'concerns':
+      state.concerns = msg.rooms ?? [];
+      renderReports();
+      break;
+
     case 'poked':
       // For the room it was asked about, if that is still the one open.
       if (msg.room && msg.room !== state.selected) break;
@@ -629,7 +719,7 @@ function handleFrame(evt) {
       // "Opening" for ever — which is what a server older than quick join
       // does, since it does not know what watching is.
       if (state.lurking && !state.lurking.room) {
-        $('room-title').textContent = 'This conversation could not be opened';
+        $('room-title').textContent = 'This chat could not be opened';
         $('room-meta').textContent = `The server said: ${msg.message}. Look around instead, or try the code again later.`;
       }
       break;
@@ -699,15 +789,19 @@ function select(room) {
  * worse than one that never made the claim.
  */
 function sayWhoCanRead(room) {
+  // Written into its own span, not the note, which also carries the note's
+  // help button: emptying the note took the button with it on the very first
+  // render, and the one explanation everybody should be able to reach was not.
   const note = document.querySelector('.public-note');
+  const text = $('public-note-text');
   const hidden = room && isPortalRoom(room.key);
   note.classList.toggle('sealed-room', Boolean(hidden));
-  note.textContent = '';
+  text.textContent = '';
 
   const lead = document.createElement('strong');
   if (hidden) {
     lead.textContent = 'Only the two of you can find this.';
-    note.append(
+    text.append(
       lead,
       document.createTextNode(
         ' It is not in the public list, and its address changes every day. It does not ' +
@@ -716,15 +810,10 @@ function sayWhoCanRead(room) {
     );
   } else {
     lead.textContent = 'Everyone can read this.';
-    note.append(
-      lead,
-      document.createTextNode(
-        ' Unencrypted messages are public, and anyone can read the whole conversation. Tick ',
-      ),
-    );
+    text.append(lead, document.createTextNode(' Tick '));
     const how = document.createElement('em');
     how.textContent = 'Encrypt';
-    note.append(how, document.createTextNode(' below to limit a message to the people here.'));
+    text.append(how, document.createTextNode(' to limit a message to the people here.'));
   }
 }
 
@@ -1178,20 +1267,20 @@ function paintWaiting() {
   const total = Object.values(state.unread).reduce((sum, n) => sum + n, 0);
   // On the Chat tab on a phone, and on the Conversations button everywhere,
   // since that is where the rooms it is counting are listed.
-  for (const badge of [$('talk-waiting'), $('rooms-waiting')]) {
+  for (const badge of [$('talk-waiting'), $('rooms-waiting'), $('room-list-waiting')]) {
     badge.textContent = total > 99 ? '99+' : String(total);
     badge.hidden = total === 0;
   }
   labelRoomsButton(total);
 }
 
-/** What the Conversations button says it holds, read out as well as shown. */
+/** What the Chats button says it holds, read out as well as shown. */
 function labelRoomsButton(waiting) {
   const count = currentRooms().length;
-  $('rooms-total').textContent = count ? String(count) : '';
+  $('rooms-total').textContent = count ? `· ${count}` : '';
   $('rooms-open').setAttribute(
     'aria-label',
-    `Conversations${count ? `, ${count}` : ''}${waiting ? `, ${waiting} unread` : ''}`,
+    `Chats${count ? `, ${count}` : ''}${waiting ? `, ${waiting} unread` : ''}`,
   );
 }
 
@@ -1219,7 +1308,21 @@ function announce(note) {
 
 /** Whichever view is showing decides which rooms are on offer. */
 /** There is one picture now, and its zones are the conversations. */
-const currentRooms = () => state.atlas?.rooms ?? [];
+/**
+ * Every room there is to open: their own map's, and the branch's while one is
+ * drawn — each once, their own map's first, so it is the same room whichever
+ * it is opened from.
+ */
+function currentRooms() {
+  const own = state.atlas?.rooms ?? [];
+  const branched = state.branch?.view?.rooms;
+  if (!branched) return own;
+  const seen = new Set(own.map((r) => r.key));
+  return [...own, ...branched.filter((r) => !seen.has(r.key))];
+}
+
+/** The map being drawn: a branch while there is one, otherwise their own. */
+const mapView = () => state.branch?.view ?? state.atlas;
 
 /** How many lurkers are watching a room, as last heard. */
 const lurkersIn = (room) => (room ? (state.lurkers[room.key] ?? room.lurkers ?? 0) : 0);
@@ -1232,16 +1335,58 @@ const lurkersIn = (room) => (room ? (state.lurkers[room.key] ?? room.lurkers ?? 
  * which happens most often to single-subject rooms, since those are the ones
  * their overlaps eat into. The list reaches them regardless of geometry.
  */
+/** How lively, against the liveliest on the platform, a chat must be to be "lively now". */
+const LIVELY = 0.3;
+
+/**
+ * The chats in view, in the order the list shows them: the ones you are in,
+ * then the rest, each busiest first — what is waiting for you, then how lively
+ * it has been (the same measure the map's heights are), then how many are in
+ * it. Headed where there are both kinds; a heading is `{heading}`.
+ */
+function orderedRooms() {
+  const rooms = currentRooms();
+  const busiest = (a, b) =>
+    (state.unread[b.key] ?? 0) - (state.unread[a.key] ?? 0) ||
+    (b.activity ?? 0) - (a.activity ?? 0) ||
+    b.population - a.population;
+  // Pinned first, as pinned; then the few liveliest of the rest, against the
+  // whole platform — the same measure the map's heights are — so the heights
+  // can be followed from the list too; then yours, then the others.
+  const pinned = rooms.filter((r) => state.pinned.has(r.key));
+  const rest = rooms.filter((r) => !state.pinned.has(r.key));
+  const lively = rest
+    .filter((r) => (r.activity ?? 0) >= LIVELY)
+    .sort((a, b) => (b.activity ?? 0) - (a.activity ?? 0))
+    .slice(0, 3);
+  const others = rest.filter((r) => !lively.includes(r));
+  const groups = [
+    ['Pinned', pinned.sort(busiest)],
+    ['Lively now', lively],
+    ['Yours', others.filter((r) => r.member).sort(busiest)],
+    ['Others on this map', others.filter((r) => !r.member).sort(busiest)],
+  ].filter(([, group]) => group.length);
+  return groups.flatMap(([heading, group]) => (groups.length > 1 ? [{ heading }, ...group] : group));
+}
+
 function renderRooms() {
   const list = $('rooms');
   list.textContent = '';
   paintWaiting();
 
-  for (const room of currentRooms()) {
+  for (const room of orderedRooms()) {
+    // A heading is words, not a button: the list is a list of chats to open.
+    if (room.heading) {
+      const heading = document.createElement('li');
+      heading.className = 'rooms-group';
+      heading.textContent = room.heading;
+      list.append(heading);
+      continue;
+    }
     const li = document.createElement('li');
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = `room-chip${room.key === state.selected ? ' on' : ''}${room.member ? ' mine' : ''}`;
+    button.className = `room-chip${room.key === state.selected ? ' on' : ''}${room.member ? ' mine' : ''}${room.offMap ? ' off-map' : ''}`;
 
     // One square per subject rather than one blended dot. A room is the
     // subjects it is made of, and two of them side by side say that in a way
@@ -1265,7 +1410,8 @@ function renderRooms() {
     // `kite-fox-9/art ∩ kite-fox-9/everyone`; the outline on the map, and the
     // group in the header, already say where it is.
     const name = document.createElement('span');
-    name.textContent = spoken(room.subjects).join(' ∩ ');
+    name.className = 'chip-name';
+    name.textContent = spoken(room.subjects).join(' + ');
 
     const count = document.createElement('span');
     count.className = 'count';
@@ -1304,8 +1450,18 @@ function renderRooms() {
       'aria-label',
       `${spoken(room.subjects).join(' and ')}, ${room.population} ${room.population === 1 ? 'person' : 'people'}` +
         `${watching ? `, ${watching} lurking` : ''}` +
-        `${room.member ? ', you are in this one' : ''}${waiting ? `, ${waiting} unread` : ''}`,
+        `${room.member ? ', you are in this one' : ''}${room.offMap ? ', not on the map' : ''}` +
+        `${state.pinned.has(room.key) ? ', pinned' : ''}${waiting ? `, ${waiting} unread` : ''}`,
     );
+
+    button.addEventListener('contextmenu', (evt) => {
+      evt.preventDefault();
+      card.hide();
+      const box = button.getBoundingClientRect?.();
+      // The keyboard's menu key says nowhere in particular: under the chip.
+      const keyed = !evt.clientX && !evt.clientY;
+      openMenu(keyed && box ? box.left + 12 : evt.clientX, keyed && box ? box.bottom : evt.clientY, room.key, button);
+    });
 
     button.addEventListener('click', () => {
       // A menu closes once something in it is chosen. The chip is rebuilt by
@@ -1343,6 +1499,9 @@ try {
 function showTip() {
   const joined = (state.diagram?.subscription?.length ?? 0) > 0;
   $('lede').hidden = tipClosed || (joined && !tipAsked);
+  // Until something is held, the way to hold something is the thing to find:
+  // Interests in the header wears the accent while there is nothing.
+  document.body.dataset.held = joined ? '1' : '0';
 }
 
 function rememberTip() {
@@ -1391,14 +1550,16 @@ showTip();
  * their interests again rather than keeping wherever they had got to.
  */
 function drawAtlas({ repaint = true, fit = false } = {}) {
-  const view = state.atlas;
+  const view = mapView();
   if (!view) {
-    $('fit').textContent = 'Drawing the map…';
+    says('Drawing the map…');
     return;
   }
 
   if (repaint || !state.viewBox) paintMap({ fit });
+  openBusiest();
   renderRooms();
+  recountRail();
   // The room as well as the list of them. A membership change drops the atlas
   // and asks for a fresh one, and until this was here the open conversation
   // was never drawn again when it arrived — so joining anything while reading
@@ -1415,9 +1576,43 @@ function drawAtlas({ repaint = true, fit = false } = {}) {
   // A new deployment starts with one person in one interest, so the ones are
   // what anybody reads first.
   const count = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-  const drawn = `${count(subjects.length, 'subject')} · ${count(zones.length, 'conversation')}, drawn to scale`;
-  $('fit').textContent = split ? `${drawn} · ${count(split, 'subject')} drawn in several pieces` : drawn;
-  $('fit').classList.toggle('flag', !report.wellFormed);
+  const drawn = `${count(subjects.length, 'interest')} · ${count(zones.length, 'chat')} · to scale`;
+  says(
+    state.branch
+      ? `Branched out · ${drawn}`
+      : !(view.subscription ?? []).length
+        ? 'Popular interests. Join one to see yours.'
+        : split
+          ? `${drawn} · ${count(split, 'interest')} shown in pieces`
+          : drawn,
+  );
+  // Orange only when the drawing is wrong: a room drawn that nobody is in, or
+  // one left out. A subject in two pieces is said in words and is not an
+  // error, and a line always in the warning colour stopped being read.
+  $('fit').classList.toggle('flag', !report.exact || report.phantoms > 0 || report.vanished > 0);
+}
+
+/**
+ * The line under the map: what is drawn, or what is being waited for. Kept as
+ * well as written, since a label under the pointer writes over it and puts it
+ * back on the way out; see `paintMap`.
+ */
+function says(text) {
+  state.status = text;
+  $('fit').textContent = text;
+}
+
+/** After a first join, the busiest chat it opened for them; see `state.openBusiest`. */
+function openBusiest() {
+  if (!state.openBusiest || state.lurking || state.groupArriving) return;
+  const mine = currentRooms().filter((r) => r.member && !isGroupRoom(r.subjects[0] ?? ''));
+  if (!mine.length) return;
+  state.openBusiest = false;
+  if (state.selected) return;
+  const [busiest] = [...mine].sort(
+    (a, b) => (b.activity ?? 0) - (a.activity ?? 0) || b.population - a.population || (a.key < b.key ? -1 : 1),
+  );
+  select(busiest.key);
 }
 
 /**
@@ -1431,7 +1626,7 @@ function drawAtlas({ repaint = true, fit = false } = {}) {
  * @param {{keep?: {ground: [number, number], fx: number, fy: number} | null}} [options]
  */
 function paintMap({ keep = null, fit = false, box = null } = {}) {
-  const view = state.atlas;
+  const view = mapView();
   if (!view) return;
   state.projection = state.relief ? view3d({ turn: state.turn, tilt: state.tilt }) : null;
   ({
@@ -1448,13 +1643,17 @@ function paintMap({ keep = null, fit = false, box = null } = {}) {
   // Put back by hand on the way out, rather than by redrawing. Redrawing
   // recomputed the fit and threw away whatever the person had panned and
   // zoomed to, so brushing past a label reset the map under their cursor.
-  const standing = $('fit').textContent;
+  //
+  // What is put back is what the line says now, not what it said when the map
+  // was drawn: the line is written after the drawing, so keeping a copy here
+  // put back the sentence before this one — after branching out, "Branching
+  // out…", about a branch that had arrived.
   for (const spot of svg.querySelectorAll('.zone-label')) {
     spot.addEventListener('mouseenter', () => {
       $('fit').textContent = spot.dataset.full;
     });
     spot.addEventListener('mouseleave', () => {
-      $('fit').textContent = standing;
+      $('fit').textContent = state.status ?? '';
     });
   }
 
@@ -1469,8 +1668,13 @@ function paintMap({ keep = null, fit = false, box = null } = {}) {
   // somebody is looking at it is a map they cannot use. It is framed afresh
   // only the first time, when asked, and when what they hold has changed,
   // since then the interests it is framed on are not the same ones.
-  const own = pointsOf(view.curves, view.subscription ?? []);
-  const framing = (view.subscription ?? []).join('|');
+  //
+  // A branch is framed on the whole of it: what it is for is the part of it
+  // they do not hold.
+  const own = state.branch ? [] : pointsOf(view.curves, view.subscription ?? []);
+  const framing = state.branch
+    ? `branch:${state.branch.from}>${state.branch.toward ?? ''}`
+    : (view.subscription ?? []).join('|');
   if (keep && state.projection && state.viewBox) {
     const [x, y] = state.projection.at(keep.ground[0], keep.ground[1]);
     const { width, height } = state.viewBox;
@@ -1498,7 +1702,8 @@ function drawnAs(view) {
     view.subscription,
     (view.curves ?? []).map((c) => [c.subject, c.components, c.anchor, c.loops]),
     (view.zones ?? []).map((z) => [z.key, z.x, z.y, z.population, z.room, z.loops]),
-    (view.rooms ?? []).map((r) => [r.key, r.activity ?? 0, r.stats?.perMinute ?? 0]),
+    // Not the chats listed beside the map: they have no ground on it.
+    (view.rooms ?? []).filter((r) => !r.offMap).map((r) => [r.key, r.activity ?? 0, r.stats?.perMinute ?? 0]),
   ]);
 }
 
@@ -1536,6 +1741,7 @@ function askNow() {
   if (state.lurking) return;
   state.askedAt = Date.now();
   send({ type: 'atlas', subjects: state.atlasSize, have: state.atlas?.shape });
+  if (state.branch) askBranch();
   if (explorer?.isOpen) send({ type: 'chart', have: state.chart?.shape });
   askLater();
 }
@@ -1603,7 +1809,7 @@ function sizeOfMap() {
  * when it was drawn, when it is framed properly now that it can be measured.
  */
 function reshapeMap() {
-  if (!state.atlas) return;
+  if (!mapView()) return;
   const now = sizeOfMap();
   // Hidden, there is nothing to fit it to until it is shown again.
   if (!now && state.viewBox) return;
@@ -1653,7 +1859,7 @@ function setRelief(on, { keep = true } = {}) {
   for (const id of ['turn-left', 'turn-right']) if ($(id)) $(id).disabled = !state.relief;
   // Flat and in relief are different drawings of different shapes, so
   // switching frames it afresh rather than keeping a view of the other one.
-  if (state.atlas) drawAtlas({ fit: true });
+  if (mapView()) drawAtlas({ fit: true });
 }
 
 try {
@@ -1667,7 +1873,7 @@ try {
  * screen — between the fingers doing it — or the middle when there is none.
  */
 function orbitTo(turn, tilt, anchor = null) {
-  if (!state.relief || !state.atlas || !state.projection || !state.viewBox) return;
+  if (!state.relief || !mapView() || !state.projection || !state.viewBox) return;
   const box = svg.getBoundingClientRect();
   const vb = state.viewBox;
   const fx = anchor && box.width ? (anchor[0] - box.left) / box.width : 0.5;
@@ -1736,8 +1942,8 @@ function drawMinimap({ recolour = false } = {}) {
   }
   const total = state.overview.subjects.length;
   $('minimap-note').textContent = mine.length
-    ? `${total.toLocaleString()} subjects · yours marked`
-    : `${total.toLocaleString()} subjects · join one to see where you are`;
+    ? `${total.toLocaleString()} interests · yours marked`
+    : `${total.toLocaleString()} interests · join one to see where you are`;
 }
 
 /**
@@ -1821,13 +2027,15 @@ function openMap() {
   $('map-stage').append(svg);
   if (typeof mapModal.showModal === 'function') mapModal.showModal();
   else mapModal.open = true;
-  refit();
+  // Framed afresh for the bigger box: asking to see it large is asking to see
+  // it, not the corner of it that fitted the panel.
+  soon(() => drawAtlas({ fit: true }));
 }
 
 function homeAgain() {
   if (!svg.closest('.map-stage')) return;
   document.querySelector('.map').insertBefore(svg, mapAnchor);
-  refit();
+  soon(() => drawAtlas({ fit: true }));
 }
 
 function closeMap() {
@@ -1943,9 +2151,339 @@ const mapGestures = gestures(svg, {
   orbit: orbitBy,
   waitForDouble: (tap) => tap.pointerType !== 'mouse',
   tap: (tap) => chooseAt(tap),
+  menu: (at) => mapMenu(at),
 });
 
 $('refit').addEventListener('click', () => drawAtlas({ fit: true }));
+
+// --- branching out ------------------------------------------------------------
+
+/**
+ * Branch the map out from one interest into a community: the interest, and
+ * the interests the same people hold with it, drawn in place of their own
+ * map until they go back. `toward` is a community next to the interest's own,
+ * by any interest in it, and then what is drawn beside the interest is the
+ * part of that community nearest it. Nothing is joined: the chats in it open
+ * as any chat they are not in does. See `World.branchFor`.
+ */
+function branchOut(from, toward = null) {
+  card.hide();
+  state.branch = { from, toward: toward ?? null, view: null };
+  says('Branching out…');
+  renderBranchBar();
+  askBranch({ whole: true });
+  showView('map');
+}
+
+/** Ask for the branch again: how its rooms are now, or the whole of it. */
+function askBranch({ whole = false } = {}) {
+  const branch = state.branch;
+  if (!branch) return;
+  send({
+    type: 'branch',
+    from: branch.from,
+    toward: branch.toward,
+    subjects: state.atlasSize,
+    ...(whole || !branch.view ? {} : { have: branch.view.shape }),
+  });
+}
+
+/** Back to their own map, framed on what they hold again. */
+function leaveBranch() {
+  if (!state.branch) return;
+  state.branch = null;
+  renderBranchBar();
+  renderRooms();
+  if (state.atlas) redrawMap(drawnAs(state.atlas));
+  else says('Drawing the map…');
+}
+
+$('branch-back').addEventListener('click', leaveBranch);
+
+/** "a, b and c". */
+const inWords = (names) => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`);
+
+/** What the map is showing instead of their own, and how big it is. */
+function renderBranchBar() {
+  const branch = state.branch;
+  $('branch-bar').hidden = !branch;
+  if (!branch) return;
+  const from = subjectLabel(branch.from);
+  const community = branch.view?.branch?.community;
+  $('branch-what').textContent = !community
+    ? `Branching out from ${from}…`
+    : `From ${from} ${branch.toward ? 'toward' : 'into'} ${inWords(community.name)}`;
+  // How much of it is theirs already, since that is what joining it would
+  // change; the whole community, not only the few interests the map drew.
+  const members = community?.members ?? [];
+  const held = heldInterests();
+  const mine = members.filter((s) => held.has(s)).length;
+  $('branch-size').textContent = community
+    ? `· ${community.size} interests${mine ? `, ${mine} yours` : ''}`
+    : '';
+  const joinable = members.length - mine;
+  $('branch-join-all').hidden = !joinable;
+  $('branch-join-some').hidden = joinable < 2;
+  $('branch-join-all').querySelector('.label').textContent = `Join all ${joinable}`;
+}
+
+/**
+ * The community an interest is in, and the ones nearest it, as far as this
+ * page knows: from a map it is drawn on, or from All interests, which has
+ * every interest's. Null where it is in none, or nothing here says.
+ */
+function communityOf(subject) {
+  const drawn = state.branch?.view?.communities?.[subject] ?? state.atlas?.communities?.[subject];
+  if (drawn) return drawn;
+  const chart = state.chart;
+  const i = chart?.subjects?.find((s) => s.id === subject)?.c;
+  const found = i === undefined ? null : chart.communities?.[i];
+  if (!found) return null;
+  const brief = (c) => ({ lead: c.name[0], name: c.name, size: c.size });
+  return { ...brief(found), near: (found.near ?? []).map((j) => chart.communities[j]).filter(Boolean).map(brief) };
+}
+
+// --- the menus ------------------------------------------------------------------
+
+/**
+ * What the right button, a long press or the menu key offers, as sections;
+ * see `public/menu.js`. A room's, the map's, and an interest's in All
+ * interests. Anything offered later is one more section in one of these.
+ */
+const menu = contextMenu();
+
+/** Where each is its own community's, then the ones next to those: the ways to branch out from some interests. */
+function branchItems(subjects) {
+  const open = subjects.filter((s) => clusterOf(s) === null && !isGroupRoom(s));
+  const items = [];
+  const offered = new Set();
+  for (const s of open) {
+    const c = communityOf(s);
+    if (!c || offered.has(c.lead)) continue;
+    offered.add(c.lead);
+    items.push({
+      icon: 'branch',
+      label: `Branch out from ${s}`,
+      detail: `Into ${inWords(c.name)} · ${c.size} interests`,
+      run: () => branchOut(s),
+    });
+  }
+  for (const s of open) {
+    for (const near of communityOf(s)?.near ?? []) {
+      if (offered.has(near.lead) || items.length >= 5) continue;
+      offered.add(near.lead);
+      items.push({
+        icon: 'branch',
+        label: `Toward ${inWords(near.name)}`,
+        detail: `${near.size} interests, next to ${s}’s`,
+        run: () => branchOut(s, near.lead),
+      });
+    }
+  }
+  if (!items.length && open.length) {
+    items.push({ label: 'Nothing to branch into yet', detail: 'Nobody holds this with anything else', disabled: true });
+  }
+  return items;
+}
+
+/** A chat's: open it, join what it needs, pin it, share it, branch out from it. */
+function roomSections(room) {
+  const items = [{ icon: 'chat', label: 'Open the chat', run: () => select(room.key) }];
+  if (!room.member && !state.lurking) {
+    const held = state.diagram?.subscription ?? [];
+    for (const subject of inner(room.subjects).filter((s) => !held.includes(s)).slice(0, 2)) {
+      items.push({ icon: 'enter', label: `Join ${subjectLabel(subject)}`, run: () => joinSubject(subject) });
+    }
+  }
+  if (!state.lurking) {
+    const pinned = state.pinned.has(room.key);
+    items.push({ icon: 'pin', label: pinned ? 'Pinned to the top' : 'Pin to the top', checked: pinned, run: () => togglePin(room.key) });
+  }
+  if (!isPortalRoom(room.key)) {
+    items.push({ icon: 'copy', label: 'Copy quick-join link', run: () => copyLink(watchLink(location.origin + location.pathname, room.key)) });
+  }
+  return [{ items }, { heading: 'Branch out', items: branchItems(room.subjects) }];
+}
+
+/** The map's own: back from a branch, the view, heights, everything else. */
+function mapSections() {
+  const items = [];
+  if (state.branch) items.push({ icon: 'map', label: 'Back to my map', run: leaveBranch });
+  items.push({ icon: 'reset', label: 'Reset view', run: () => drawAtlas({ fit: true }) });
+  items.push({ icon: 'cube', label: 'Heights', checked: state.relief, run: () => setRelief(!state.relief) });
+  items.push({ icon: 'compass', label: 'Explore interests', run: () => explorer.open() });
+  return [{ heading: 'Map', items }];
+}
+
+/**
+ * The menu for a chat, or for the map where there is none, at a point of the
+ * window. From the map it has the map's own as well.
+ */
+function openMenu(x, y, key, returnTo, { map = false } = {}) {
+  const room = key ? currentRooms().find((r) => r.key === key) : null;
+  const sections = [...(room ? roomSections(room) : []), ...(map || !room ? mapSections() : [])];
+  menu.open({ x, y, title: room ? spoken(room.subjects).join(' and ') : 'Map', sections, returnTo });
+}
+
+/** The map pressed for its menu: for whatever chat is there, or the map itself. */
+function mapMenu(at) {
+  card.hide();
+  let x = at.clientX;
+  let y = at.clientY;
+  let key;
+  if (at.pointerType === 'keyboard') {
+    // The menu key says nowhere in particular: the middle of the map, for the
+    // chat that is open if it is on it.
+    const box = svg.getBoundingClientRect?.() ?? { left: 0, top: 0, width: 0, height: 0 };
+    x = box.left + box.width / 2;
+    y = box.top + box.height / 2;
+    key = state.selected;
+  } else {
+    key = at.target?.closest?.('.group-name')?.dataset.room ?? hit(at);
+  }
+  openMenu(x, y, currentRooms().some((r) => r.key === key) ? key : null, svg, { map: true });
+}
+
+/** An interest in All interests: join it or open it, and branch out from it. */
+function interestMenu(id, at) {
+  const holds = heldInterests().has(id);
+  const items = holds
+    ? [{ icon: 'chat', label: 'Open its chat', run: () => openInterest(id) && explorer.close() }]
+    : [{ icon: 'enter', label: `Join ${id}`, run: () => joinSubject(id) }];
+  // Branching out is done on the map, so the sheet makes way for it.
+  const branches = branchItems([id]).map((item) => (item.run ? { ...item, run: () => (explorer.close(), item.run()) } : item));
+  menu.open({
+    x: at.clientX,
+    y: at.clientY,
+    title: id,
+    sections: [{ items }, { heading: 'Branch out', items: branches }],
+    within: $('explorer'),
+  });
+}
+
+// --- joining a community, all of it or some of it ---------------------------------
+
+/**
+ * Join several interests at once: a whole community, or whichever of it was
+ * picked. One ask and one redraw rather than a dozen of each — except inside
+ * a group, where each is the group's own copy of an interest and has to be
+ * made as it is joined; see `joinSubject`.
+ */
+function joinMany(subjects) {
+  const held = heldInterests();
+  const wanted = [...new Set(subjects)].filter((s) => s && !held.has(s));
+  if (!wanted.length) return;
+  if (state.cluster) for (const subject of wanted) joinSubject(subject);
+  else send({ type: 'join', subjects: wanted });
+  notify(`Joined ${wanted.length === 1 ? wanted[0] : `${wanted.length} interests`}.`);
+}
+
+/**
+ * Some of a community, not all of it: a switch for each interest, on for the
+ * ones that would be joined. What is already held is on and cannot be
+ * switched off here — leaving an interest is done where leaving is done.
+ */
+function openJoinSome(subjects, title) {
+  const held = heldInterests();
+  const all = [...new Set(subjects)];
+  const chosen = new Set(all.filter((s) => !held.has(s)));
+  state.joining = chosen;
+  const list = $('join-some-list');
+  list.textContent = '';
+
+  const count = () => {
+    $('join-some-count').textContent = chosen.size
+      ? `Join ${chosen.size} ${chosen.size === 1 ? 'interest' : 'interests'}`
+      : 'Nothing picked';
+    $('join-some-go').disabled = chosen.size === 0;
+  };
+
+  for (const subject of all) {
+    const mine = held.has(subject);
+    const li = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'switch-row';
+    button.setAttribute('role', 'switch');
+    button.setAttribute('aria-checked', String(mine || chosen.has(subject)));
+    button.setAttribute('aria-label', mine ? `${subject}, already yours` : subject);
+    if (mine) button.disabled = true;
+    const track = document.createElement('span');
+    track.className = 'switch-track';
+    track.append(document.createElement('span'));
+    const name = document.createElement('span');
+    name.className = 'switch-name';
+    name.textContent = subject;
+    button.append(track, name);
+    if (mine) {
+      const note = document.createElement('span');
+      note.className = 'switch-note';
+      note.textContent = 'already yours';
+      button.append(note);
+    } else {
+      button.addEventListener('click', () => {
+        if (chosen.has(subject)) chosen.delete(subject);
+        else chosen.add(subject);
+        button.setAttribute('aria-checked', String(chosen.has(subject)));
+        count();
+      });
+    }
+    li.append(button);
+    list.append(li);
+  }
+
+  $('join-some-title').textContent = `Join some of ${title}`;
+  const spare = all.length - chosen.size;
+  $('join-some-say').textContent = `${all.length} interests in this community${spare ? `, ${spare} already yours` : ''}. Switch off any you do not want.`;
+  count();
+  closePopouts();
+  if (typeof $('join-some').showModal === 'function') $('join-some').showModal();
+  else $('join-some').open = true;
+}
+
+const closeJoinSome = () => {
+  const sheet = $('join-some');
+  if (typeof sheet.close === 'function') sheet.close();
+  else sheet.open = false;
+};
+
+$('join-some-close').addEventListener('click', closeJoinSome);
+$('join-some-go').addEventListener('click', () => {
+  joinMany([...(state.joining ?? [])]);
+  closeJoinSome();
+});
+
+/** The community the map is branched into: everything in it, not only what is drawn. */
+const branchedCommunity = () => state.branch?.view?.branch?.community ?? null;
+
+$('branch-join-all').addEventListener('click', () => {
+  const community = branchedCommunity();
+  if (community) joinMany(community.members ?? []);
+});
+
+$('branch-join-some').addEventListener('click', () => {
+  const community = branchedCommunity();
+  if (community) openJoinSome(community.members ?? [], inWords(community.name));
+});
+
+/** A link on the clipboard, or said where it can be copied from by hand. */
+async function copyLink(link) {
+  try {
+    await navigator.clipboard.writeText(link);
+    notify('Link copied.');
+  } catch {
+    notify(link);
+  }
+}
+
+// From a chat on a phone, back to the list of them: the map, with the list
+// open on it and the first chat in it ready to be chosen.
+$('room-list').addEventListener('click', () => {
+  showView('map');
+  closePopouts($('rooms-open'));
+  setPopout($('rooms-open'), true);
+  soon(() => $('rooms').querySelector('button')?.focus());
+});
 
 
 $('subject-count').addEventListener('input', (evt) => {
@@ -1954,7 +2492,7 @@ $('subject-count').addEventListener('input', (evt) => {
 });
 $('subject-count').addEventListener('change', () => {
   state.atlas = null;
-  $('fit').textContent = 'Redrawing…';
+  says('Redrawing…');
   send({ type: 'atlas', subjects: state.atlasSize });
 });
 
@@ -1983,7 +2521,7 @@ function hit(evt) {
   const pt = pointFrom(evt);
   if (!pt) return null;
   const [x, y] = state.projection ? state.projection.ground(pt.x, pt.y) : [pt.x, pt.y];
-  return zoneAt(state.atlas?.curves ?? [], x, y);
+  return zoneAt(mapView()?.curves ?? [], x, y);
 }
 
 const repaint = () => paintAtlas(state.territories, state.selected, state.grounds);
@@ -2031,14 +2569,14 @@ function chooseAt(evt) {
   }
   const at = hit(evt);
   if (!at) {
-    notify('No conversation there.');
+    notify('No chat there.');
     return;
   }
   if (!currentRooms().some((r) => r.key === at)) {
     // Rounding the outlines leaves hairline seams where two territories graze
     // without really meeting. A point caught in one names a combination
     // nobody holds, so it opens nothing rather than opening an empty room.
-    notify('No conversation there.');
+    notify('No chat there.');
     return;
   }
   select(at);
@@ -2071,7 +2609,7 @@ function joinPrompt(room) {
 
   const lead = document.createElement('p');
   lead.className = 'joining-lead';
-  lead.textContent = 'You are not in this conversation.';
+  lead.textContent = 'You are not in this chat yet.';
 
   const why = document.createElement('p');
   why.className = 'joining-why';
@@ -2123,19 +2661,34 @@ function renderRoom() {
   // a lurker, who is only watching.
   const sharing = Boolean(room) && !state.lurking && !isPortalRoom(room.key);
   $('room-share').hidden = !sharing;
-  // Poking is for somebody in the conversation or looking at it, not a lurker,
-  // who is only watching and has nobody to ask anything of.
-  $('poke').hidden = !room || Boolean(state.lurking);
+  // What to do with a message about to be written — encrypt it, or poke the
+  // server for something to say — only where there is a message to write:
+  // for somebody in the chat, not somebody looking in from outside it, and
+  // not a lurker.
+  const writing = Boolean(room?.member) && !state.lurking;
+  document.querySelector('.choices').hidden = !writing;
+  $('poke').hidden = !writing;
+  paintPin(room);
+  // What joining in would do, where the button to do it is: which interests it
+  // adds, and how many are in it and talking.
+  if (state.lurking && room) {
+    const people = room.population ?? 0;
+    const rate = room.stats?.perMinute ?? 0;
+    $('lurk-adds').textContent =
+      `Join in adds ${spoken(room.subjects).join(' and ')} to your interests. ` +
+      `${people} ${people === 1 ? 'person is' : 'people are'} in it` +
+      `${rate ? `, saying about ${rate} a minute lately` : ''}.`;
+  }
   paintPoke();
   if (!sharing && $('room-share').getAttribute('aria-expanded') === 'true') setPopout($('room-share'), false);
 
   if (!room) {
-    $('room-title').textContent = 'Pick a conversation';
+    $('room-title').textContent = 'Pick a chat';
     $('room-meta').textContent =
-'Open one from the map, or from the list under it.';
+'Open one on the map, or from Chats.';
     body.disabled = true;
     $('send').disabled = true;
-    body.placeholder = 'Pick a conversation first';
+    body.placeholder = 'Pick a chat first';
     sayWhoCanRead(null);
     return;
   }
@@ -2165,7 +2718,7 @@ function renderRoom() {
   body.disabled = !room.member;
   $('send').disabled = !room.member;
   body.placeholder = room.member
-    ? `Say something to the ${room.population} people here`
+    ? `Say something to ${room.population === 1 ? 'the 1 person' : `the ${room.population} people`} here`
     : `Join ${needed} to take part`;
   // The way in is offered in the log, where the room itself would be — see
   // `joinPrompt`. Repeating the buttons under the composer as well would be
@@ -2207,6 +2760,16 @@ function renderRoom() {
 
   const messages = state.history[room.key] ?? [];
   if (!messages.length) {
+    // Nobody has said anything, which is where people stall: the server is
+    // asked, once per chat, for a question to start it with, and it appears
+    // above the box, as when poked by hand.
+    // Not for somebody who has muted what the server writes: asking it for
+    // something to say, unasked, is exactly what they turned off. Poke the
+    // server is still there for anybody who wants one.
+    if (room.member && !state.lurking && !state.hushSystem && !state.autoPoked.has(room.key)) {
+      state.autoPoked.add(room.key);
+      send({ type: 'poke', room: room.key });
+    }
     if (room.member || state.lurking) {
       const empty = document.createElement('li');
       empty.className = 'empty';
@@ -2233,7 +2796,7 @@ function renderRoom() {
   };
 
   for (const m of messages) {
-    if (isMuted(m) && !state.revealed.has(m.id)) {
+    if ((isMuted(m) || (state.hushSystem && m.machine)) && !state.revealed.has(m.id)) {
       folded.push(m);
       continue;
     }
@@ -2327,7 +2890,16 @@ function renderRoom() {
       button.addEventListener('click', () => send({ type: 'vote', messageId: m.id, value }));
       voting.append(button);
     }
-    if (acting) head.append(voting);
+
+    // Everything but replying, in a tray behind ⋯: agree and disagree, mute,
+    // report, delete, the ones that cannot be undone last. On a screen with a
+    // pointer the tray shows with the pointer over the message, as the actions
+    // always did; on a phone, where every message used to carry five words of
+    // them on two lines, it opens from ⋯. See `.msg-actions`.
+    const tray = document.createElement('span');
+    tray.className = 'msg-actions';
+    tray.id = `acts-${String(m.id).replace(/[^\w-]/g, '_')}`;
+    if (acting) tray.append(voting);
 
     // Your own words are yours to take back, and doing so is recorded like
     // any other deletion rather than quietly.
@@ -2346,7 +2918,7 @@ function renderRoom() {
         state.deleting.set(m.id, JSON.parse(JSON.stringify(m)));
         send({ type: 'forget', messageId: m.id });
       });
-      head.append(remove);
+      tray.append(remove);
     }
 
     if (acting && m.authorId !== state.me?.id) {
@@ -2359,8 +2931,9 @@ function renderRoom() {
         ? 'You have reported this'
         : 'Tell a moderator about this message';
       flag.setAttribute('aria-label', `Report the message from ${m.author}`);
-      flag.addEventListener('click', () => askWhy(m, flag));
-      head.append(flag);
+      // The reasons open under the message's words, not inside the row of
+      // its name, which they used to split in two.
+      flag.addEventListener('click', () => askWhy(m, text));
 
       // Beside report, and not the same thing. Reporting asks a moderator to
       // look; muting is a choice about your own screen, and nobody is told.
@@ -2376,8 +2949,11 @@ function renderRoom() {
           : 'Stop seeing what this person says. Only you will know';
         hush.setAttribute('aria-label', `${already ? 'Unmute' : 'Mute'} ${m.author}`);
         hush.addEventListener('click', () => (already ? unmute(person) : mute(m)));
-        head.append(hush);
+        tray.append(hush);
       }
+      // Muting before reporting, and reporting just before deleting: the
+      // lighter thing first.
+      tray.append(flag);
     }
 
     // Replying to somebody, which is the ordinary way a conversation with
@@ -2392,7 +2968,32 @@ function renderRoom() {
       renderRoom();
       $('body').focus();
     });
-    if (acting) head.append(reply);
+
+    if (acting) {
+      // How it has been received, quietly in the heading, so the counts are
+      // there to read without opening anything.
+      if (tally.up || tally.down) {
+        const said = document.createElement('span');
+        said.className = 'vote-tally';
+        said.textContent = [tally.up && `${tally.up} agree`, tally.down && `${tally.down} disagree`]
+          .filter(Boolean)
+          .join(' · ');
+        head.append(said);
+      }
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'msg-more';
+      more.textContent = '⋯';
+      more.setAttribute('aria-expanded', 'false');
+      more.setAttribute('aria-controls', tray.id);
+      more.setAttribute('aria-label', `More for the message from ${m.author}`);
+      more.addEventListener('click', () => {
+        const open = more.getAttribute('aria-expanded') !== 'true';
+        more.setAttribute('aria-expanded', String(open));
+        tray.classList.toggle('open', open);
+      });
+      head.append(reply, more, tray);
+    }
 
     li.append(head);
     if (quoted) li.append(quoted);
@@ -2769,7 +3370,7 @@ function restoreGroup() {
     state.selected = watched;
     document.body.dataset.lurking = '';
     $('lurk-bar').hidden = false;
-    $('room-title').textContent = 'Opening the conversation…';
+    $('room-title').textContent = 'Opening the chat…';
     $('room-meta').textContent = '';
     showView('talk');
     // Not the group this browser was in: a lurker is in none.
@@ -2831,6 +3432,106 @@ $('lurk-join').addEventListener('click', () => stopLurking({ join: true }));
 $('lurk-leave').addEventListener('click', () => stopLurking());
 
 /** The quick-join code for the conversation that is open, drawn as it is opened. */
+// --- pins -----------------------------------------------------------------------
+
+const PINNED_KEY = 'eulerchat.pinned';
+
+try {
+  state.pinned = new Set(JSON.parse(localStorage.getItem(PINNED_KEY) ?? '[]'));
+} catch {
+  /* nothing pinned, or nowhere to have kept it */
+}
+
+/** Pinned or not, said on the button as well as shown. */
+function paintPin(room) {
+  const pin = $('room-pin');
+  // Not for a lurker, who leaves nothing on this device, pins included.
+  pin.hidden = !room || Boolean(state.lurking);
+  if (pin.hidden) return;
+  const on = state.pinned.has(room.key);
+  pin.setAttribute('aria-pressed', String(on));
+  pin.querySelector('.label').textContent = on ? 'Pinned' : 'Pin';
+  pin.setAttribute('aria-label', on ? 'Unpin this chat' : 'Pin this chat');
+}
+
+$('room-pin').addEventListener('click', () => {
+  const room = selectedRoom();
+  if (room) togglePin(room.key);
+});
+
+/** Pin a chat to the top of the list, or unpin it: from its button or a menu. */
+function togglePin(key) {
+  if (state.pinned.has(key)) state.pinned.delete(key);
+  else state.pinned.add(key);
+  try {
+    localStorage.setItem(PINNED_KEY, JSON.stringify([...state.pinned]));
+  } catch {
+    /* pinned for as long as the page is open */
+  }
+  paintPin(selectedRoom());
+  renderRooms();
+}
+
+// --- reports, for a moderator -----------------------------------------------------
+
+function renderReports() {
+  const list = $('reports-list');
+  list.textContent = '';
+  $('reports-none').hidden = state.concerns.length > 0;
+  $('reports-count').textContent = state.concerns.length ? String(state.concerns.length) : '';
+  for (const concern of state.concerns) {
+    const li = document.createElement('li');
+    li.className = 'report-row';
+    const name = document.createElement('strong');
+    name.textContent = spoken(concern.subjects ?? []).join(' and ') || concern.room;
+    // Why, in words, most given first.
+    const why = new Map();
+    for (const report of concern.reports ?? []) {
+      const says = REASONS[report.reason]?.says ?? report.reason;
+      why.set(says, (why.get(says) ?? 0) + 1);
+    }
+    const reasons = document.createElement('p');
+    reasons.className = 'report-why';
+    reasons.textContent =
+      [...why].sort((a, b) => b[1] - a[1]).map(([says, n]) => (n > 1 ? `${says} (${n})` : says)).join(' · ') ||
+      'Flagged by the word list';
+    const counts = document.createElement('p');
+    counts.className = 'report-counts';
+    const n = (concern.reports ?? []).length;
+    counts.textContent =
+      `${n} report${n === 1 ? '' : 's'}` +
+      `${concern.flags ? ` · ${concern.flags} flagged` : ''}` +
+      ` · ${concern.messages} message${concern.messages === 1 ? '' : 's'} · ${concern.population} ${concern.population === 1 ? 'person' : 'people'}`;
+    const actions = document.createElement('div');
+    actions.className = 'report-actions';
+    const look = document.createElement('button');
+    look.type = 'button';
+    look.textContent = 'Look in';
+    look.title = 'Open it to lurk in, in a new tab: counted as lurking, not as a member';
+    look.addEventListener('click', () => window.open(watchLink(location.origin + location.pathname, concern.room), '_blank', 'noopener'));
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.textContent = 'Clear';
+    clear.title = 'Judged fine: take it off the list until somebody reports it again';
+    clear.addEventListener('click', () => send({ type: 'clear', room: concern.room }));
+    actions.append(look, clear);
+    li.append(name, reasons, counts, actions);
+    list.append(li);
+  }
+}
+
+const reports = $('reports');
+$('reports-open').addEventListener('click', () => {
+  closePopouts();
+  if (typeof reports.showModal === 'function') reports.showModal();
+  else reports.open = true;
+  send({ type: 'concerns' });
+});
+$('reports-close').addEventListener('click', () => {
+  if (typeof reports.close === 'function') reports.close();
+  else reports.open = false;
+});
+
 $('room-share').addEventListener('click', () => {
   const room = selectedRoom();
   if (!room || $('room-share-pop').hidden) return;
@@ -3060,6 +3761,7 @@ $('recording').addEventListener('change', (evt) => {
 
 function subjectRow(subject, population, held) {
   const li = document.createElement('li');
+  li.dataset.subject = subject;
 
   // The swatch is the control. A subject's colour comes from its name, which
   // is what keeps it the same on every visit — but names collide, and two
@@ -3138,7 +3840,7 @@ function discoveryRow(find, held) {
     // How many more, rather than a list of them nobody is going to read.
     const more = (find.opens ?? rooms.length) - 1;
     if (more > 0) {
-      why.append(document.createTextNode(`, and ${more} more conversation${more === 1 ? '' : 's'}`));
+      why.append(document.createTextNode(`, and ${more} more chat${more === 1 ? '' : 's'}`));
     }
   } else {
     // Somebody with nothing to bridge from. There is no overlap to point at,
@@ -3325,11 +4027,16 @@ function mutedRun(run) {
   const li = document.createElement('li');
   li.className = 'muted-run';
 
-  const people = new Set(run.map(personOf)).size;
+  const written = run.filter((m) => m.machine).length;
+  const people = new Set(run.filter((m) => !m.machine).map(personOf)).size;
   const says = document.createElement('span');
-  says.textContent =
-    `${run.length === 1 ? 'A message' : `${run.length} messages`} from ` +
-    `${people === 1 ? 'someone' : 'people'} you muted`;
+  const from =
+    written === run.length
+      ? 'the server'
+      : written
+        ? `the server and ${people === 1 ? 'someone' : 'people'} you muted`
+        : `${people === 1 ? 'someone' : 'people'} you muted`;
+  says.textContent = `${run.length === 1 ? 'A message' : `${run.length} messages`} from ${from}`;
 
   const show = document.createElement('button');
   show.type = 'button';
@@ -3342,6 +4049,48 @@ function mutedRun(run) {
   li.append(says, show);
   return li;
 }
+
+/**
+ * Messages the server writes rather than a person: a question to start a quiet
+ * chat, and everything the made-up people of a demo say. Muted, they are
+ * folded away in the room, never announced, and the server is told to stop
+ * counting them as unread or telling this page about them at all.
+ *
+ * Kept in this browser, and said again on every connection, since the server
+ * keeps preferences by who somebody is and a fresh guest is somebody new.
+ */
+const HUSH_KEY = 'eulerchat.hushSystem';
+
+function hushSystem(on) {
+  state.hushSystem = on;
+  try {
+    localStorage.setItem(HUSH_KEY, on ? 'on' : 'off');
+  } catch {
+    /* muted for as long as the page is open */
+  }
+  paintHush();
+  send({ type: 'notifications', settings: { system: !on } });
+  renderRoom();
+}
+
+function paintHush() {
+  const button = $('hush-system');
+  button.setAttribute('aria-pressed', String(state.hushSystem));
+  button.querySelector('.label').textContent = state.hushSystem ? 'System messages muted' : 'System messages on';
+  button.setAttribute(
+    'aria-label',
+    state.hushSystem ? 'Unmute messages written by the server' : 'Mute messages written by the server',
+  );
+}
+
+$('hush-system').addEventListener('click', () => hushSystem(!state.hushSystem));
+
+try {
+  state.hushSystem = localStorage.getItem(HUSH_KEY) === 'on';
+} catch {
+  /* nothing remembered here */
+}
+paintHush();
 
 $('offer-mute').addEventListener('change', (evt) => {
   state.offerMutes = evt.target.checked;
@@ -3654,16 +4403,39 @@ function group(list, title) {
  * every push, and is the same mistake the diagram avoids by showing a
  * neighbourhood instead of a world.
  */
+/**
+ * How many hold each interest the map knows about: the room of that interest
+ * alone, which reaches everybody holding it. Not the zone's number, which is
+ * only the people holding it and nothing else on this map — the list of
+ * interests said 47 for film photography while the same map's list of chats
+ * said 67. Before the picture arrives there is nothing, and the rows wait.
+ */
+function railPopulation() {
+  return new Map(
+    currentRooms()
+      .filter((room) => room.subjects.length === 1)
+      .map((room) => [room.subjects[0], room.population]),
+  );
+}
+
+/**
+ * The counts in the list of interests, brought up to date where they stand.
+ * Not the list drawn again: that would take somebody's place in it, and the
+ * focus off the button they were about to press, every ten seconds.
+ */
+function recountRail() {
+  const population = railPopulation();
+  for (const li of $('subjects').querySelectorAll('li[data-subject]')) {
+    const n = population.get(li.dataset.subject);
+    const count = [...li.children].find((node) => node.classList.contains('count'));
+    if (n !== undefined && count) count.textContent = String(n);
+  }
+}
+
 function renderRail() {
   const { rail, subscription } = state.diagram;
   const held = new Set(subscription);
-  // Counts come from the picture now rather than from a circle layout, and the
-  // interests are drawn before the picture arrives, so must manage without them.
-  const population = new Map(
-    (state.atlas?.zones ?? [])
-      .filter((zone) => zone.subjects.length === 1)
-      .map((zone) => [zone.subjects[0], zone.population]),
-  );
+  const population = railPopulation();
   const list = $('subjects');
   list.textContent = '';
 
@@ -4034,9 +4806,31 @@ const explorer = mountExplorer(document, {
     openInterests();
   },
   room: openInterest,
+  // The chat for two interests at once, if there is one: from "Often held
+  // with" in All interests. Opened as any chat is — with the way in, if it
+  // is one they are not in yet.
+  pair: (a, b) =>
+    currentRooms().find((r) => {
+      const own = r.subjects.filter((s) => !isGroupRoom(s)).map(subjectLabel).sort();
+      return own.length === 2 && own[0] === [a, b].sort()[0] && own[1] === [a, b].sort()[1];
+    })?.key ?? null,
+  openRoom: (key) => {
+    if (!currentRooms().some((r) => r.key === key)) return false;
+    select(key);
+    return true;
+  },
   opened: closePopouts,
   relief: () => state.relief,
   setRelief,
+  menu: (id, at) => interestMenu(id, at),
+  // A community picked in All interests: branched into on the map, or joined
+  // whole, or in part. See `lib/communities.js`.
+  branch: (id) => {
+    explorer.close();
+    branchOut(id);
+  },
+  joinAll: (subjects) => joinMany(subjects),
+  joinSome: (subjects, title) => openJoinSome(subjects, title),
 });
 
 // The minimap is the explorer, small; pressing it goes in. The buttons are

@@ -18,6 +18,8 @@
  *   double tap or double click               zoom in, there (with Shift, out)
  *   two-finger tap                           zoom out
  *   a tap                                    whatever the drawing does with one
+ *   right click, a long press, or the        the drawing's menu for whatever is
+ *   keyboard's menu key                      there (a right drag still orbits)
  *
  * Getting about is the thing done most, so it is the one finger; turning the
  * drawing to see behind something is the second hand's job, as it is on a
@@ -62,6 +64,8 @@ const DECIDE_AFTER = 20;
 const NOTCH = 1.18;
 /** How long a run of wheel events from a trackpad is taken to be one gesture. */
 const TRACKPAD_HOLD = 300;
+/** How long a finger is held still, in milliseconds, to ask for the menu. */
+export const HOLD = 500;
 
 /**
  * @param {Element} el
@@ -73,6 +77,9 @@ const TRACKPAD_HOLD = 300;
  * @param {() => boolean} [hooks.canOrbit]  whether there is anything to orbit
  * @param {(tap: {clientX: number, clientY: number, target: Element | null, pointerType: string}) => void} [hooks.tap]
  * @param {(tap: object) => boolean} [hooks.waitForDouble]  hold a tap back until it is sure to be single
+ * @param {(at: {clientX: number, clientY: number, target: Element | null, pointerType: string}) => void} [hooks.menu]
+ *   the menu for what is at a point; `pointerType` is 'keyboard' for the menu key, whose point is
+ *   wherever the browser says, often nowhere useful
  */
 export function gestures(el, hooks = {}) {
   const pointers = new Map();
@@ -86,6 +93,13 @@ export function gestures(el, hooks = {}) {
   let claimedUntil = 0;
   let twoFingers = false;
   let trackpadUntil = 0;
+  let holding = null;
+  let held = false;
+
+  const letGo = () => {
+    clearTimeout(holding);
+    holding = null;
+  };
 
   const now = () => Date.now();
   const canOrbit = () => Boolean(hooks.canOrbit?.());
@@ -115,17 +129,34 @@ export function gestures(el, hooks = {}) {
     if (!pointers.size) {
       moved = 0;
       twoFingers = false;
+      held = false;
       pressTarget = evt.target ?? null;
-      pressButton = evt.button ?? 0;
+      // Control and the main button is the right button, on a Mac.
+      pressButton = evt.button === 0 && evt.ctrlKey && (evt.pointerType ?? 'mouse') === 'mouse' ? 2 : (evt.button ?? 0);
     }
     pointers.set(evt.pointerId, { x: evt.clientX, y: evt.clientY });
     el.setPointerCapture?.(evt.pointerId);
+    letGo();
 
     if (pointers.size === 1) {
       // A mouse's right button, or Shift, orbits it, where it can be orbited
       // at all; everything else moves it.
       const orbiting = (evt.button === 2 || (evt.button === 0 && evt.shiftKey)) && canOrbit();
       mode = orbiting ? 'orbit' : 'pan';
+      // A finger held still is asking for the menu, as the right button is.
+      if ((evt.pointerType === 'touch' || evt.pointerType === 'pen') && hooks.menu) {
+        const at = { clientX: evt.clientX, clientY: evt.clientY, target: pressTarget, pointerType: evt.pointerType };
+        holding = setTimeout(() => {
+          holding = null;
+          if (pointers.size !== 1 || moved > TAP_SLOP) return;
+          held = true;
+          // Lifting it afterwards is only lifting it.
+          mode = 'lifting';
+          lastTap = null;
+          hooks.menu(at);
+        }, HOLD);
+        holding?.unref?.();
+      }
     } else if (pointers.size === 2) {
       twoFingers = true;
       const start = pairOf();
@@ -144,6 +175,7 @@ export function gestures(el, hooks = {}) {
     p.x = evt.clientX;
     p.y = evt.clientY;
     moved += Math.abs(dx) + Math.abs(dy);
+    if (holding && moved > TAP_SLOP) letGo();
 
     if (pointers.size === 1) {
       if (mode === 'orbit') orbitBy(dx, dy, null);
@@ -185,6 +217,7 @@ export function gestures(el, hooks = {}) {
 
   const end = (evt) => {
     if (!pointers.has(evt.pointerId)) return;
+    letGo();
     const wasTwo = pointers.size === 2;
     const pair = wasTwo ? pairOf() : null;
     pointers.delete(evt.pointerId);
@@ -206,10 +239,17 @@ export function gestures(el, hooks = {}) {
 
     // Only the plain press of a finger or the main button is a tap: the
     // other buttons are somebody turning the map, or reaching for a menu.
-    const tapped = evt.type === 'pointerup' && !twoFingers && moved <= TAP_SLOP && pressButton === 0;
+    // A finger held for the menu has had it already.
+    const still = evt.type === 'pointerup' && !twoFingers && moved <= TAP_SLOP && !held;
+    const tapped = still && pressButton === 0;
     mode = null;
     if (!tapped) {
       lastTap = null;
+      // The right button pressed and let go where it was: the menu. Dragged,
+      // it was turning the map, and that is all it was.
+      if (still && pressButton === 2) {
+        hooks.menu?.({ clientX: evt.clientX, clientY: evt.clientY, target: pressTarget, pointerType: evt.pointerType ?? 'mouse' });
+      }
       return;
     }
 
@@ -244,8 +284,15 @@ export function gestures(el, hooks = {}) {
   el.addEventListener('pointerup', end);
   el.addEventListener('pointercancel', end);
 
-  // The right button turns it, so it does not also open the browser's menu.
-  el.addEventListener('contextmenu', (evt) => evt.preventDefault());
+  // Never the browser's menu: the right button turns it, and let go where it
+  // was, opens the drawing's own. The browser says so too, before the press
+  // or after it, and that is the same press; with no press about it, it is
+  // the keyboard's menu key.
+  el.addEventListener('contextmenu', (evt) => {
+    evt.preventDefault();
+    if (pointers.size || now() < claimedUntil) return;
+    hooks.menu?.({ clientX: evt.clientX, clientY: evt.clientY, target: evt.target ?? null, pointerType: 'keyboard' });
+  });
 
   /**
    * The wheel, which is three different things. A trackpad pinch arrives as

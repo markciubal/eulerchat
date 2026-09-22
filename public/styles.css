@@ -574,45 +574,63 @@ main {
   touch-action: none;
 }
 
-/* The strip along the top of the map holds five buttons, and the map can be
-   made narrower than five buttons with words on. The panel is measured rather
+/* The strip along the top of the map holds four or five buttons, and the map
+   can be made narrower than that with words on. The panel is measured rather
    than the page, since docked, as a window and on a phone are three different
    widths on the same screen. The words go, the pictures stay, and the buttons
    keep their names; see the markup.
 
-   What goes first is what the picture says well enough alone: Pop out and
-   Expand. Explore keeps its words longest, since "all interests" is the part
-   of it a compass does not say. Below that the right-hand buttons take a row
-   of their own, and the pop-outs hang under both rows. The widths are the
-   buttons' own, measured, with a 12px gap between the two sides. */
+   Pop out, Expand and View are their pictures alone at every width. What goes
+   first is "interests" from Explore, then the right-hand buttons take a row
+   of their own, and the pop-outs hang under both rows; last, "Explore" goes
+   too. Pop out is only on the strip from 900px up, so the widths differ
+   either side of that. Measured in Chrome with a two-figure count and an
+   unread badge on Chats: left 292px with "Explore interests", 240 with
+   "Explore", 191 with neither; right 145 with Pop out, 95 without; 9px each
+   side they are inset by, and 16px between the two sides. */
 .map {
   container: map / inline-size;
 }
 
-@container map (max-width: 627px) {
-  .map-popout .map-button-word {
-    display: none;
+@media (min-width: 900px) {
+  @container map (max-width: 470px) {
+    .word-more {
+      display: none;
+    }
+  }
+
+  @container map (max-width: 418px) {
+    .map-float-right {
+      top: calc(46px + var(--map-top, 0px));
+    }
+
+    .popout {
+      top: calc(84px + var(--map-top, 0px));
+      max-height: calc(100% - 92px - var(--map-top, 0px));
+    }
   }
 }
 
-@container map (max-width: 575px) {
-  #map-expand .map-button-word {
-    display: none;
+@media (max-width: 899px) {
+  @container map (max-width: 420px) {
+    .word-more {
+      display: none;
+    }
+  }
+
+  @container map (max-width: 368px) {
+    .map-float-right {
+      top: calc(46px + var(--map-top, 0px));
+    }
+
+    .popout {
+      top: calc(84px + var(--map-top, 0px));
+      max-height: calc(100% - 92px - var(--map-top, 0px));
+    }
   }
 }
 
-@container map (max-width: 528px) {
-  .map-float-right {
-    top: calc(46px + var(--map-top, 0px));
-  }
-
-  .popout {
-    top: calc(84px + var(--map-top, 0px));
-    max-height: calc(100% - 92px - var(--map-top, 0px));
-  }
-}
-
-@container map (max-width: 337px) {
+@container map (max-width: 257px) {
   .map-button-word {
     display: none;
   }
@@ -878,8 +896,18 @@ body[data-dragging] .map-bar {
 .choices {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 4px 16px;
   padding: 0 12px 6px;
+}
+
+.choices[hidden] {
+  display: none;
+}
+
+/* Poke the server, at the far end of the row its answer appears just above. */
+.choices #poke {
+  margin-left: auto;
 }
 
 /* --- settings, from the header ------------------------------------------- */
@@ -921,6 +949,25 @@ body[data-dragging] .map-bar {
   padding: 4px 11px;
   font-size: 12px;
   border-radius: var(--pill);
+}
+
+/* A link to a page of its own, dressed as the buttons beside it. */
+.settings-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 4px 11px;
+  font-size: 12px;
+  border: 1px solid var(--edge);
+  border-radius: var(--pill);
+  background: var(--bg);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.settings-link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* Nothing to lay out on a phone, where the panes take turns rather than sit
@@ -1072,6 +1119,14 @@ body[data-dragging] .map-bar {
   fill: var(--accent);
 }
 
+/* The header's Settings: its word goes where the header is short of room, and
+   its name stays, for anybody listening. */
+@media (max-width: 479px) {
+  #settings-open .bar-button-word {
+    display: none;
+  }
+}
+
 /* --- the map in relief ---------------------------------------------------- */
 
 /* What a room's top is laid on: solid, so its colour can keep saying how busy
@@ -1189,9 +1244,101 @@ body[data-dragging] .map-bar {
   padding: 0;
 }
 
+.rooms-group {
+  flex-basis: 100%;
+  margin: 6px 2px 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.rooms-group:first-child {
+  margin-top: 0;
+}
+
+/* The count beside the list's heading: a space a flex heading would drop. */
+#rooms-total {
+  margin-left: 4px;
+}
+
+/* A chat of yours that the map does not draw: listed, dashed, so it does not
+   look like something to go and find on the map. */
+.room-chip.off-map {
+  border-style: dashed;
+}
+
+/* A room they are not in yet: fainter, one tap from its way in. */
+.zone-ground.away {
+  opacity: 0.45;
+}
+
+/* What joining in would do, on the lurk bar. */
+.lurk-adds {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+/* A moderator's reports. */
+.reports-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.report-row {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.report-why,
+.report-counts {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+
+.report-counts {
+  color: var(--muted);
+}
+
+.report-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* The chat for both, beside an interest often held with the one picked. */
+.explorer-with li {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.explorer-with .with-open {
+  width: auto;
+  align-self: flex-start;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.rooms > li {
+  max-width: 100%;
+}
+
+/* One line each, however many interests: the whole name is in its label,
+   and on its card. */
+.chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .room-chip {
   display: flex;
   align-items: center;
+  max-width: 100%;
   gap: 6px;
   padding: 3px 9px 3px 6px;
   font-size: 12px;
@@ -1251,6 +1398,20 @@ body[data-dragging] .map-bar {
 
 /* --- room --- */
 
+/* The way back to the list of chats, on a phone only; see the markup. Scoped
+   to the chat's head, since a pill button's own display would otherwise
+   outrank a rule this plain and show it everywhere. */
+.room-head .room-list {
+  display: none;
+}
+
+@media (max-width: 719px) {
+  .room-head .room-list {
+    display: inline-flex;
+    margin-bottom: 6px;
+  }
+}
+
 .room-head {
   position: relative;
   padding: 12px 14px 8px;
@@ -1271,23 +1432,17 @@ body[data-dragging] .map-bar {
   padding-right: 8.5rem;
 }
 
-/* Poke the server sits beside it, and the title keeps clear of both. */
-.room-head:has(#poke:not([hidden])) {
-  padding-right: 10rem;
+.room-head:has(#room-pin:not([hidden])):has(#room-share:not([hidden])) {
+  padding-right: 13.5rem;
 }
 
-.room-head:has(#poke:not([hidden])):has(#room-share:not([hidden])) {
-  padding-right: 18rem;
-}
-
-/* On a narrow screen, only its mark: its name is still its name to anybody
-   listening, and on hover. */
-@media (max-width: 560px) {
-  #poke .label {
+/* On a phone, Pin is its mark alone, and named. */
+@media (max-width: 719px) {
+  #room-pin .label {
     display: none;
   }
 
-  .room-head:has(#poke:not([hidden])):has(#room-share:not([hidden])) {
+  .room-head:has(#room-pin:not([hidden])):has(#room-share:not([hidden])) {
     padding-right: 11rem;
   }
 }
@@ -1413,6 +1568,24 @@ body[data-dragging] .map-bar {
   flex-direction: column;
   overflow-y: auto;
   padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+}
+
+/* The one setting about joining, folded at the foot of the list. */
+.join-options {
+  flex: none;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.join-options > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.join-options[open] > summary {
+  margin-bottom: 8px;
 }
 
 .rail-total {
@@ -1894,6 +2067,16 @@ input:disabled::placeholder {
   gap: 6px;
 }
 
+/* On a phone the controls lie along the bottom of the sheet, where they
+   cover least of it, rather than up its side over the names. */
+@media (max-width: 719px) {
+  .explorer-zoom {
+    right: 50%;
+    transform: translateX(50%);
+    flex-direction: row;
+  }
+}
+
 .explorer-zoom button {
   width: 36px;
   height: 36px;
@@ -2354,6 +2537,318 @@ input:disabled::placeholder {
 
 /* A card on the drawing for the first visit. It goes once anything is joined,
    or when it is closed. */
+/* Branched out: what the map shows instead of their own, and the way back.
+   See `branchOut`. */
+.branch-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(34rem, 100%);
+  padding: 6px 6px 6px 10px;
+  border-radius: var(--radius);
+  border-color: var(--accent);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.branch-bar[hidden] {
+  display: none;
+}
+
+.branch-bar > .icon {
+  color: var(--accent);
+}
+
+.branch-words {
+  margin: 0;
+  min-width: 0;
+}
+
+#branch-size {
+  color: var(--muted);
+}
+
+.branch-bar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  white-space: nowrap;
+}
+
+/* The communities beside All interests, while it is coloured by them; see
+   `lib/communities.js`. */
+.explorer-communities h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.community-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.community-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-small);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.community-row:hover {
+  background: var(--raised);
+}
+
+.community-row.on {
+  border-color: var(--accent);
+  background: var(--raised);
+}
+
+.community-swatch {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 3px;
+}
+
+.community-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.community-actions {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.community-held {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.community-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* One interest, switched on to join it; see `openJoinSome`. */
+.switch-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-small);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.switch-row:hover:not(:disabled) {
+  background: var(--raised);
+}
+
+.switch-row:disabled {
+  cursor: default;
+  color: var(--muted);
+}
+
+.switch-track {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  flex: none;
+  border-radius: var(--pill);
+  background: var(--raised);
+  border: 1px solid var(--edge);
+  transition: background 120ms ease;
+}
+
+.switch-track > span {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--edge);
+  transition: transform 120ms ease, background 120ms ease;
+}
+
+.switch-row[aria-checked='true'] .switch-track {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.switch-row[aria-checked='true'] .switch-track > span {
+  background: var(--panel);
+  transform: translateX(14px);
+}
+
+.switch-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.switch-note {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.join-some-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+}
+
+/* A movement is a statement about what is happening, and off is off. */
+@media (prefers-reduced-motion: reduce) {
+  .switch-track,
+  .switch-track > span {
+    transition: none;
+  }
+}
+
+/* The menu for whatever was pressed; see `public/menu.js`. Over everything,
+   at the point it was asked for. */
+.context-menu {
+  position: fixed;
+  z-index: 50;
+  min-width: 14rem;
+  max-width: min(22rem, calc(100vw - 16px));
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.2);
+  font-size: 13px;
+  outline: none;
+}
+
+.menu-title {
+  margin: 0;
+  padding: 6px 10px 4px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.menu-section + .menu-section {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.menu-heading {
+  margin: 0;
+  padding: 4px 10px 2px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.menu-item {
+  display: flex;
+  /* Against the page's own buttons, which are centred. */
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-small);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-item > .icon {
+  color: var(--muted);
+}
+
+.menu-item:hover,
+.menu-item:focus-visible,
+.menu-item:focus {
+  background: var(--raised);
+  outline: none;
+}
+
+.menu-item:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.menu-item[aria-disabled='true'] {
+  cursor: default;
+  color: var(--muted);
+  background: none;
+}
+
+.menu-item[aria-checked='true'] .menu-label::after {
+  content: ' ✓';
+  color: var(--accent);
+}
+
+.menu-words {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.menu-detail {
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* A finger needs more to aim at. */
+@media (pointer: coarse) {
+  .menu-item {
+    min-height: 44px;
+  }
+}
+
 .lede {
   display: flex;
   align-items: flex-start;
@@ -2374,6 +2869,20 @@ input:disabled::placeholder {
 
 .lede p {
   margin: 0;
+}
+
+.lede-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* Before anything is held, the header's Interests is the thing to press. */
+body[data-held='0'] .bar .interests-open {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--panel);
 }
 
 .lede-close {
@@ -2663,6 +3172,64 @@ li:hover .msg-action,
 .vote:hover {
   color: inherit;
   text-decoration: underline;
+}
+
+/* The tray of what else can be done with a message; see `renderRoom`. Reply
+   is out in front of it, where the actions always started. */
+.msg-action.reply {
+  margin-left: auto;
+}
+
+.msg-actions {
+  display: none;
+  align-items: center;
+  gap: 2px 6px;
+  flex-wrap: wrap;
+}
+
+.msg-actions .votes,
+.msg-actions .msg-action {
+  margin-left: 0;
+  opacity: 1;
+}
+
+.msg-actions.open {
+  display: inline-flex;
+}
+
+.msg-more {
+  border: 0;
+  background: none;
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: var(--radius-small);
+}
+
+.msg-more[aria-expanded='true'] {
+  color: var(--ink);
+  background: var(--raised);
+}
+
+/* With a pointer, the whole tray with the pointer over the message or the
+   keyboard in it, as the actions always were; the ⋯ is for touch. */
+@media (hover: hover) {
+  #log li:hover .msg-actions,
+  #log li:focus-within .msg-actions {
+    display: inline-flex;
+  }
+
+  .msg-more {
+    display: none;
+  }
+}
+
+.vote-tally {
+  font-size: 12px;
+  color: var(--muted);
 }
 
 /* The statement that this place is public. It is the one thing on the page
@@ -3677,6 +4244,25 @@ li:hover .msg-action,
   display: none;
 }
 
+/* The demo, said in the header of every page it serves; see `server/demo.js`.
+   In the accent, and solid, where the lurking pill is dashed and muted: this
+   is not a state somebody is in but a fact about the whole place. */
+.demo-pill {
+  display: none;
+}
+
+body[data-demo] .demo-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 11px;
+  border: 1px solid var(--accent);
+  border-radius: var(--pill);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
 body[data-lurking] .lurk-pill {
   display: inline-flex;
   align-items: center;
@@ -3688,7 +4274,7 @@ body[data-lurking] .lurk-pill {
   white-space: nowrap;
 }
 
-body[data-lurking] .bar > :not(h1, .lurk-pill),
+body[data-lurking] .bar > :not(h1, .lurk-pill, .demo-pill),
 body[data-lurking] .map,
 body[data-lurking] .splitter,
 body[data-lurking] .switch,

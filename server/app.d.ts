@@ -2,7 +2,24 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { WebSocketServer } from 'ws';
 import type { Notification, NotifyPrefs, RegionKey } from '../lib/index.js';
 
-export { World, seed, stock, type Message, type Room, type DiagramView, type AtlasView, type CatalogueLevel } from './store.js';
+export {
+  World,
+  seed,
+  stock,
+  type Message,
+  type Room,
+  type DiagramView,
+  type AtlasView,
+  type BranchView,
+  type Community,
+  type CatalogueLevel,
+} from './store.js';
+
+/** How many commitments one `forgotten` event on the firehose carries; a bigger deletion comes in parts. */
+export const FORGOTTEN_PER_EVENT: number;
+
+/** How many interests one `join` frame may carry, for joining a community at once. */
+export const JOIN_AT_ONCE: number;
 
 export interface Session<Socket = unknown> {
   id: string;
@@ -140,6 +157,13 @@ export function createEulerChat(options?: {
   publicApi?: boolean;
   /** Where the open read API lives. Defaults to `/api`. */
   apiPath?: string;
+  /**
+   * Keep the firehose in public dumps of at most `bytes` (a megabyte by
+   * default) at `/api/dumps`, for whoever was not holding it open. A dump
+   * loses a message when the place forgets it, and goes `keepFor` after the
+   * last thing in it. On wherever `publicApi` is, and off otherwise.
+   */
+  dumps?: boolean | { bytes?: number; keep?: number; keepFor?: number };
   /**
    * Who the host says a connection is, from the upgrade request - its cookies,
    * its headers, its query string. Everybody is an anonymous guest when this

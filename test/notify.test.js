@@ -298,3 +298,52 @@ test('closing the registry stops it listening', () => {
   w.post(v, ['art'], 'after');
   assert.equal(count, during, 'nothing after close');
 });
+
+test('a room coming into being is told about, but is not something unread', () => {
+  // Every join opens a room for each new combination of what somebody holds,
+  // and each was counted as unread: seven joins, fifty-one unread, and not
+  // one message among them.
+  const w = seed(new World());
+  const notes = new Notifications(w);
+  const told = [];
+  notes.onNotify((userId, note) => {
+    told.push(note.kind);
+    return true;
+  });
+  const wren = w.addUser('wren');
+  for (const s of ['art', 'philosophy', 'music']) w.join(wren, s);
+  assert.ok(told.includes('room-opened'), 'still told');
+  assert.deepEqual(notes.counts(wren), {}, 'but nothing waiting to be read');
+});
+
+test('what the server writes can be muted, and then is neither counted nor told about', () => {
+  const written = post({ message: { machine: true, author: 'p12', body: 'What got you into art?' } });
+  // On by default: quiet, since a question is there to be found rather than
+  // to call anybody over, but still something waiting to be read.
+  assert.equal(classify(written, watcher()).kind, 'message');
+  assert.equal(classify(written, watcher()).level, QUIET);
+  // Muted: nothing at all, so nothing badges a room either.
+  assert.equal(classify(written, watcher({ system: false })), null);
+  // And a person's words are untouched by it.
+  assert.ok(classify(post(), watcher({ system: false })));
+});
+
+test('a page can ask for that, and the server stops counting them', () => {
+  const w = seed(new World());
+  const notes = new Notifications(w);
+  const me = w.addUser('me');
+  const them = w.addUser('them');
+  for (const s of ['art']) {
+    w.join(me, s);
+    w.join(them, s);
+  }
+  w.post(them, ['art'], 'a question from the server', { machine: true });
+  assert.equal(notes.counts(me).art, 1, 'counted to begin with');
+
+  notes.clear(me);
+  notes.configure(me, { system: false });
+  w.post(them, ['art'], 'another one', { machine: true });
+  assert.deepEqual(notes.counts(me), {}, 'and not once muted');
+  w.post(them, ['art'], 'but a person still is');
+  assert.equal(notes.counts(me).art, 1);
+});

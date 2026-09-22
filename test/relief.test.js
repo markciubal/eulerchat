@@ -378,3 +378,16 @@ test('the catalogue list is every interest, under its division, indented by dept
   assert.equal(withStray.at(-1).label, 'Not in the catalogue yet');
   assert.equal(withStray.at(-1).options[0].text, 'the shed (2)');
 });
+
+test('a room they are not in yet is drawn fainter, flat and in relief', () => {
+  const view = seededAtlas();
+  const outside = view.rooms.find((r) => r.key === 'music') ?? view.rooms[0];
+  const marked = { ...view, rooms: view.rooms.map((r) => (r.key === outside.key ? { ...r, member: false } : { ...r, member: true })) };
+  for (const relief of [null, view3d()]) {
+    const svg = canvas();
+    renderAtlas(svg, marked, { relief });
+    const away = [...svg.querySelectorAll('.zone-ground.away')];
+    assert.ok(away.length >= 1, `${relief ? 'relief' : 'flat'}: something is faint`);
+    assert.ok(away.every((g) => g.getAttribute('data-zone') === outside.key), 'only the room they are not in');
+  }
+});

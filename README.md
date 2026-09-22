@@ -21,6 +21,7 @@ npm start          # http://localhost:8787 — 1,100 interests, nobody in them y
 npm run start:sample # the same, with a few made-up people in three of them
 npm run start:large # 1000 interests, 4000 made-up people
 npm run start:questions # the sample people ask questions, as system messages
+npm run demo       # http://localhost:8790 — 50,000 made-up people, talking; never a deployment
 npm test
 
 node server/index.js --interests 300 --people 2000
@@ -151,6 +152,7 @@ const chat = createEulerChat({
   mount: '/chat',             // lives under a path; omit for the root
   serveClient: true,          // also serve the bundled UI
   publicApi: false,           // the default: no open read API unless asked for
+  dumps: undefined,           // the firehose in public 1MB dumps; on wherever publicApi is
   moderators: [],             // key fingerprints that may read reports; nobody by default
   authenticate: undefined,    // (req) => account | null, if you have accounts; see below
 });
@@ -255,6 +257,9 @@ GET /api/rooms/{key}/log        one room's messages     ?since=&limit=
 GET /api/scrape                 everything, resumable   ?since=&limit=
 GET /api/receipts               the record of deletions ?since=
 GET /api/firehose               a live stream of events (server-sent events)
+GET /api/dumps                  the firehose, a megabyte at a time: what there is
+GET /api/dumps/{id}             one dump, one JSON event per line (NDJSON)
+GET /streams                    a page for watching all of the above
 ```
 
 The firehose is the same shape as BlueSky's: connect, and receive everything as
@@ -264,6 +269,49 @@ it happens.
 const stream = new EventSource('http://localhost:8787/api/firehose');
 stream.addEventListener('message', (e) => console.log(JSON.parse(e.data)));
 ```
+
+Its events are `message`, `room-opened`, `room-closed`, `forgotten` (the
+messages the place has let go, named by their commitments rather than their
+ids, with the hash of the deletion receipt that names them too; a big one
+comes in `part`s of 2,000, each with the same receipt) and
+`dump` (a new dump is ready to fetch). A reader who falls a megabyte behind is
+let go rather than queued for without end, and can pick up what they missed
+from the dumps.
+
+**Dumps are for whoever was not listening.** Everything the firehose sends is
+also gathered, one line per event, until the next line would take it past a
+megabyte. What has gathered then becomes a dump, and the gathering starts
+again from nothing, so nothing is ever sent out more than a megabyte at a
+time. The first line of each says what it is.
+
+```sh
+curl -s localhost:8787/api/dumps              # {"bytes":1000000,"pending":{…},"dumps":[{"id":1,…,"url":"/api/dumps/1"}]}
+curl -s localhost:8787/api/dumps/1 | head -2  # {"type":"dump","id":1,…}  then the first event
+```
+
+A dump is not an archive, because a copy kept by the server would be the
+server breaking its own word. A message the place forgets, on the clock or on
+request, goes from the dump it is in at the same moment, and a later dump
+carries the `forgotten` event that says so; a copy taken earlier should
+forget it too. Every field a commitment covers is in the message as the
+stream sent it, so a copy is matched by recomputing it:
+
+```js
+import { commitment } from './lib/receipt.js';
+const gone = new Set(event.commitments);
+for (const m of copies) if (gone.has(await commitment(m))) drop(m);
+```
+
+Naming them by id would work as well for whoever holds a copy, and would also
+tell anybody who had only seen an id, in a reply or a link, that the message
+went and why. A dump only ever shrinks, goes twelve hours after the last
+thing in it, and is only ever held in memory. A portal's messages are in no
+dump, and a sealed message is its envelope, exactly as everywhere else here.
+
+`/streams` is that same public view in a page: the firehose live, filtered by
+kind or interest; the dumps, with how full the next one is; and the deletion
+record. It reads only what anybody can read, the way anybody would. The chat
+links to it from Settings, wherever the server publishes.
 
 That openness is a decision about what this place *is*, and it has to be
 carried through the product rather than mentioned in a footnote. The interface
@@ -676,6 +724,16 @@ walking into something.
   that no person has spoken in for three minutes, and never twice running. None
   go inside a group or a portal, and a machine question never interrupts
   anybody: it is counted, not notified.
+- **Mutable.** **Settings → Alerts → System messages** mutes the lot of them,
+  which is worth having in a demo, where fifty thousand made-up people are
+  talking. Muted, the server is told `{ system: false }` and stops telling this
+  page about them at all, so they are not counted as unread either; the
+  messages still arrive in the room, folded into one line that says how many
+  and shows them on a press, the way a muted person's messages are. Nothing is
+  asked for on your behalf while they are muted, so an empty chat is not poked
+  for a question to start it with; **Poke the server** still is. What is muted
+  is kept in the browser and said again on every connection, since the server
+  keeps preferences by who somebody is and a fresh guest is somebody new.
 
 ## A portal
 
@@ -1272,6 +1330,91 @@ The page redraws at most every ten seconds for anything but its own change.
   eight, and Enter flies to the first. That is also the way round it without a
   pointer: a thousand dots are not something to tab through.
 
+### Communities, and branching out into one
+
+The hierarchy says what an interest *is*. The links All interests draws say
+who comes with it: pairs of interests that people hold both of, weighted by
+how strongly (`lib/association.js`). Grouped, those links give communities —
+interests the same people turn up to together, which often cut across the
+hierarchy. Guitar, piano and drumming land in one because the same people
+hold them; so, in the right crowd, do history, hiking and climbing.
+
+```js
+world.communities();  // { list: [{ lead, name, members, near }], of: Map(interest → index) }
+```
+
+Found by the Louvain method over the links and nothing else; see
+`lib/communities.js`. A thousand interests and fifteen hundred links take
+about forty milliseconds, and it is worked out again only when who holds what
+changes, as the chart is. Every order it goes in is fixed, so the same links
+give the same communities on every server, and each is named by its most-held
+interests. A link needs two people holding both and only the open world is
+linked, so a community says nothing the sheet did not already show; nothing
+inside a group is in one.
+
+**Branching out** is the map of somewhere you are not. Right-click a chat on
+the map — or hold a finger on it — and the menu offers the community each of
+its interests is in, and the ones next to those. Branching draws that
+community in place of your own map: the interest you came from, and the
+community's interests most held with it.
+
+```js
+world.branchFor(userId, 'guitar');                       // guitar's own community
+world.branchFor(userId, 'guitar', { toward: 'python' }); // the one next to it: what bridges the two
+```
+
+Nothing is joined by branching. Chats you are in are yours as always, and the
+rest are drawn as chats you are not in yet, to open, look in on and join like
+any other. A bar along the bottom says what is being shown and takes you back;
+your own map is kept up to date beside it, so the list of chats stays yours. A
+branch is asked for again every ten seconds, like the map, and answered the
+same way — only the rooms, while the drawing in hand is still the drawing:
+
+```js
+{ type: 'branch', from: 'guitar', toward: null, subjects: 5, have: 'a1b2…' }
+```
+
+**Joining one.** Where a community is offered — the bar under a branch, and
+the list in All interests — it can be joined whole or in part. **Join all**
+takes everything in it you do not already hold; **Join some** opens a switch
+for each interest, on for the ones that would be joined, with what you hold
+already on and fixed, and a button saying how many. Both go in one frame:
+
+```js
+{ type: 'join', subjects: ['piano', 'drums', 'singing'] }
+```
+
+One ask and one redraw rather than a dozen of each, capped at `JOIN_AT_ONCE`.
+Nobody may hold more than `MAX_SUBSCRIPTIONS` interests — the census is cubic
+in what one person holds — so joining a big community can run into that: what
+fits is joined, and the rest is refused with a message saying why, rather than
+the whole ask failing on the last of them.
+
+**Coloured by community.** The button under 3D in All interests colours every
+interest by the community it is in rather than by its own name, and lists the
+communities beside the sheet, biggest first, each with its colour and how many
+interests are in it. Picking one lights it on the sheet and offers it: branch
+out into it, join all of it, or join some. An interest in no community stays
+grey. Hues are dealt round the wheel by the golden angle so that neighbours
+look unalike (`communityColour`), through the same lightness window as every
+other colour here, so both themes are served without a branch.
+
+### A menu for whatever was pressed
+
+The right button, a long press, or the keyboard's menu key opens a menu for
+what is under it, where the browser would otherwise put its own
+(`public/menu.js`). A right *drag* still turns the map, so only a right button
+let go where it was pressed is a menu; on a phone a finger held still for half
+a second is, and a finger that moves is moving the map.
+
+A chat's menu opens it, joins what it needs, pins it, copies its quick-join
+link, and branches out from each of its interests. The map's own resets the
+view, switches the heights, opens All interests, and goes back from a branch.
+An interest in All interests has its own, inside the sheet — everything
+outside an open modal dialog is inert, and a menu there could be seen and not
+pressed. Each is a list of sections, so anything offered later is one more
+section rather than another menu.
+
 ### In relief: as tall as it is lively
 
 The map and All interests are drawn in 3D by default. Every conversation on
@@ -1295,18 +1438,20 @@ world.activity();  // { rooms, subjects }: each 0..1 against the liveliest
 - **Height.** The square root of activity, over a small floor: a room nobody
   has spoken in yet is low, never flattened away.
 - **Moving round it.** The same gestures on the map and in All interests
-  (`public/gestures.js`). It is a thing to turn in the hand, so the gesture
-  used most is the one that turns it:
+  (`public/gestures.js`). Getting about is the thing done most, so it is the
+  one finger; turning the map to see behind something is the second hand's
+  job, as it is on a phone's maps:
 
   | gesture | does |
   |---|---|
-  | one finger or the mouse, dragged | orbit: across turns, up and down tilts (flat: moves) |
-  | two fingers dragged | move |
+  | one finger or the mouse, dragged | move |
+  | two fingers dragged | orbit: across turns, up and down tilts, twisted turns (flat: moves) |
   | two fingers pinched | zoom |
-  | right or middle button, or Shift, dragged | move, with a mouse |
-  | trackpad: two fingers scrolled / pinched | move / zoom |
+  | right button, or Shift, dragged | orbit, with a mouse; the middle button moves |
+  | trackpad: two fingers scrolled / pinched | orbit (flat: move) / zoom |
   | mouse wheel | zoom, a notch at a time |
   | double tap or double click (Shift: out), two-finger tap | zoom in (out) |
+  | right click, a long press, or the menu key | the menu for what is there |
 
   On a phone a tap on the map opens a conversation and leaves the map for it,
   so a finger's tap waits a moment (`DOUBLE_GAP`) to be sure it is not the
@@ -1324,6 +1469,50 @@ world.activity();  // { rooms, subjects }: each 0..1 against the liveliest
   no sorting of shapes against each other. See `public/relief.js`. A room's
   top is not over its own ground any more, so every top and wall carries
   `data-zone`, and a press reads the room off what is drawn there.
+
+### Where things are
+
+What is used every visit is in front; what is set once is a menu away.
+Nothing was taken out to get there. The words are one per thing: a **chat**
+is where people talk (the code and the API still say room), and an
+**interest** is what you hold.
+
+- **Header:** Interests (in the accent until you hold something), Group, your
+  name and key, Theme, and Settings (an icon on a phone). **Settings** is about
+  you: alerts, **Your messages** (keep a copy of what I send, check the
+  deletion record), **Muting and reporting**, and your key.
+- **The map's strip:** Chats (the chats on the map, yours first, busiest
+  first), Explore interests, and as icons Pop out, Expand and View. **View** is
+  about the map: reset, 3D and turning, how many interests to draw, the
+  minimap, layout (swap sides, pop out, reset), and how this works.
+- **A chat:** its name and Quick join at the top. On a phone, a Chats button to
+  get back to the list. Encrypt and Poke the server above the box you type in,
+  only when you can post. Each message shows reply, and the rest behind ⋯:
+  agree, disagree, mute, report and delete. With a mouse they appear on hover.
+- **Interests:** search first, then the whole list to pick from, then what is
+  suggested. **Joining options** is folded away at the foot.
+
+### Small things that help
+
+- **Every chat of yours is in the list.** The map draws a handful of
+  interests; the atlas also lists, as `offMap`, the other chats you are in that
+  somebody else is in too (the busiest hundred), so none is out of reach.
+  They are dashed in Chats and do not redraw the map when they change.
+- **Pinned**, **Lively now** (activity of 0.3 or more against the liveliest on
+  the platform, three at most), **Yours** and **Others on this map**, in that
+  order, in Chats. Pins are kept in this browser only.
+- **After your first join**, the busiest chat it put you in is opened.
+- **An empty chat** asks the server, once, for a question to start it with,
+  shown as Poke the server's answer is.
+- **The lurk bar** says what Join in adds, and how many are in the chat and
+  talking.
+- **Explore's "Often held with"** offers **Open the chat for both** where the
+  two meet on your map.
+- **On the map**, rooms you are not in yet are fainter: one tap from their way
+  in.
+- **Moderators** — keys the host trusts, told so in `welcome` — get
+  **Reports** in Settings: each chat reported, why and how often, with **Look
+  in** (a lurk, in its own tab) and **Clear**.
 
 ### A map that holds still
 
@@ -1523,6 +1712,51 @@ layout — realising an arbitrary region structure with every subject connected
 is not always possible at all — and it does not respond to more space or a
 finer grid, so it is reported (`report.disconnected`, `report.worstSplit`)
 rather than papered over. The default is five.
+
+## The demo
+
+`npm run demo` is a place to try this out among company: fifty thousand
+made-up people across 1,200 interests, some of them talking at any moment,
+others coming and going. Join anything and the rooms round it are already
+busy; say something and, now and then, somebody made-up in the room answers a
+few seconds later.
+
+How busy a room is has three modes rather than one curve — most rooms are
+quiet (a word an hour or so), a good share steady (every few minutes) and a
+few busy (twice a minute or more), each spread a factor of two about its
+mode — so the map has a floor, a middle and peaks rather than one tower over a
+flat plain. Which kind a room is comes from its name, so it is the same kind
+every time. The rooms round whoever is online get a share of their own on top
+of the rest, and for the first half-minute after somebody arrives a larger
+one, so their map comes up while they watch. See `server/traffic.js`.
+
+```
+node server/demo.js --people 50000 --interests 1200 --rate 2 --near 0.6 --churn 0.4 --reply 0.6 --port 8790
+```
+
+`--rate` is words a second across the place, `--near` words a second round
+whoever is online, `--churn` joins and leaves a second, and `--reply` the
+chance somebody answers a real person. At fifty thousand it is ready in about
+a second and holds about 150MB.
+
+**It stays away from production.** It is its own entry point, which neither
+the `Procfile` nor `npm start` reaches, and it refuses to start where the
+environment says it is a deployment — `NODE_ENV=production`, a Heroku dyno,
+Render, Fly.io, Railway, Vercel, Cloud Run, AWS, Azure App Service or
+Kubernetes. It keeps no ledger and writes nothing, so a restart forgets it all
+and none of it can be handed back to a real server. It listens on its own port
+(8790, or `DEMO_PORT`, or `--port`) rather than `PORT`, so it never takes a
+real server's place. And it says what it is: every page it serves wears a
+**Demo** label, and every word its people say is a system message, marked as
+such as the sample world's are. Only the made-up people ever say anything;
+never a real person, and never inside a group.
+
+The open read API is on, so that the firehose has something in it to watch at
+[localhost:8790/streams](http://localhost:8790/streams). It says "demo" too: in
+the API's index, in the first line of every dump, and in every dump's file
+name. The two thousand words said while it warms up fill most of the first
+megabyte, so the first dump is cut about five minutes after it starts, and
+one every quarter of an hour after that.
 
 ## Deploying
 

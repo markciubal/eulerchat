@@ -113,7 +113,8 @@ export function renderAtlas(svg, view, { relief = null } = {}) {
   // not carry anything of its own. Each room is now a filled shape, coloured
   // by its subjects and shaded by how busy it is.
   const rooms = new Map((view.rooms ?? []).map((r) => [r.key, r]));
-  const peak = Math.max(1, ...[...rooms.values()].map((r) => r.stats?.perMinute ?? 0));
+  // Measured among the rooms drawn, not those only listed beside the map.
+  const peak = Math.max(1, ...[...rooms.values()].filter((r) => !r.offMap).map((r) => r.stats?.perMinute ?? 0));
 
   for (const zone of view.zones ?? []) {
     if (!zone.loops?.length) continue;
@@ -122,7 +123,8 @@ export function renderAtlas(svg, view, { relief = null } = {}) {
       'fill-rule': 'evenodd',
       fill: regionFill(zone.subjects),
       'fill-opacity': heat(rooms.get(zone.key)?.stats, peak).toFixed(3),
-      class: 'zone-ground',
+      // Faint where they are not in it yet: one tap from its way in.
+      class: `zone-ground${rooms.get(zone.key)?.member === false ? ' away' : ''}`,
       'data-room': cssId(zone.key),
       // The room itself, as it is written everywhere else: what a pointer
       // over this ground is pointing at. See `hit` in public/app.js.
@@ -228,7 +230,7 @@ export function renderAtlas(svg, view, { relief = null } = {}) {
     if (says.length < 2) continue;
 
     const spot = el('g', { class: 'zone-label', 'data-room': zone.key, 'data-zone': zone.key });
-    const full = `${says.join(' ∩ ')} · ${zone.population} here`;
+    const full = `${says.join(' and ')} · ${zone.population} here`;
 
     const title = doc.createElementNS(NS, 'title');
     title.textContent = full;
@@ -243,7 +245,7 @@ export function renderAtlas(svg, view, { relief = null } = {}) {
     written.push({
       text,
       short: abbreviate(says, labels),
-      long: says.join(' ∩ '),
+      long: says.join(' + '),
       room: zone.room ?? 0,
       size: 15,
     });
@@ -322,7 +324,7 @@ function renderRelief(svg, view, relief) {
 
   const held = new Set(subscription);
   const rooms = new Map((view.rooms ?? []).map((r) => [r.key, r]));
-  const peak = Math.max(1, ...[...rooms.values()].map((r) => r.stats?.perMinute ?? 0));
+  const peak = Math.max(1, ...[...rooms.values()].filter((r) => !r.offMap).map((r) => r.stats?.perMinute ?? 0));
   const band = (extent * TALLEST) / BANDS;
   const levelOf = (key) =>
     Math.max(1, Math.round(heightOf(rooms.get(key)?.activity, extent * TALLEST, extent * FLOOR) / band));
@@ -427,7 +429,7 @@ function renderRelief(svg, view, relief) {
       href: `#${id}`,
       fill: colour,
       'fill-opacity': heat(rooms.get(zone.key)?.stats, peak).toFixed(3),
-      class: 'zone-ground',
+      class: `zone-ground${rooms.get(zone.key)?.member === false ? ' away' : ''}`,
       'data-room': cssId(zone.key),
       'data-zone': zone.key,
     });
@@ -530,7 +532,7 @@ function renderRelief(svg, view, relief) {
     if (says.length < 2) continue;
     const [x, y] = relief.at(zone.x, zone.y, level * band);
     const spot = el('g', { class: 'zone-label', 'data-room': zone.key, 'data-zone': zone.key });
-    const full = `${says.join(' ∩ ')} · ${zone.population} here`;
+    const full = `${says.join(' and ')} · ${zone.population} here`;
     const title = doc.createElementNS(NS, 'title');
     title.textContent = full;
     const text = el('text', { x: x.toFixed(1), y: y.toFixed(1) });
@@ -538,7 +540,7 @@ function renderRelief(svg, view, relief) {
     spot.append(title, text);
     spot.dataset.full = full;
     svg.append(spot);
-    written.push({ text, short: abbreviate(says, labels), long: says.join(' ∩ '), room: zone.room ?? 0, size: 15 });
+    written.push({ text, short: abbreviate(says, labels), long: says.join(' + '), room: zone.room ?? 0, size: 15 });
   }
 
   return { territories, grounds, labels, written, raised: highest * band, cull: raised.map((r) => r.seen) };

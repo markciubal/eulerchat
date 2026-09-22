@@ -1,4 +1,4 @@
-import { NS, stroke } from './diagram.js';
+import { NS, communityColour, stroke } from './diagram.js';
 import { fitTo } from './minimap.js';
 import { TILT, clampTilt, heightOf, shade, view3d } from './relief.js';
 import { gestures } from './gestures.js';
@@ -108,6 +108,12 @@ const people = (n) => `${n} ${n === 1 ? 'person' : 'people'}`;
 /** How tall the liveliest interest's column stands, as a share of the sheet. */
 export const COLUMN = 0.11;
 
+/** An interest in no community at all, coloured by community. */
+const LONE = '#8b8b8b';
+
+/** How many communities are listed beside the sheet, biggest first. */
+const COMMUNITIES_LISTED = 40;
+
 /** A twelfth of a turn at a time, as on the map. */
 const TURN_STEP = Math.PI / 6;
 
@@ -128,11 +134,17 @@ function column(r, h, relief) {
  *
  * @param {SVGSVGElement} svg
  * @param {{subjects: Array, labels?: Array}} chart  from the server's `chart` frame
- * @param {{held?: Set<string>, relief?: ReturnType<typeof view3d> | null}} [options]
- *   `relief`: stand each interest up as a column, in that view; flat without
+ * @param {{held?: Set<string>, relief?: ReturnType<typeof view3d> | null, tint?: boolean}} [options]
+ *   `relief`: stand each interest up as a column, in that view; flat without.
+ *   `tint`: colour each by the community it is in rather than by its own name,
+ *   so what the same people hold reads as one thing; see `lib/communities.js`.
  * @returns {Map<string, Element[]>}
  */
-export function drawChart(svg, chart, { held = new Set(), relief = null } = {}) {
+export function drawChart(svg, chart, { held = new Set(), relief = null, tint = false } = {}) {
+  // By community, an interest in none is left grey: there is no community it
+  // could be the colour of, and colouring it by its name again would read as
+  // one of its own.
+  const paint = (s) => (tint ? (s.c === undefined ? LONE : communityColour(s.c)) : stroke(s.id));
   const doc = svg.ownerDocument;
   const el = (name, attrs = {}) => {
     const node = doc.createElementNS(NS, name);
@@ -206,7 +218,7 @@ export function drawChart(svg, chart, { held = new Set(), relief = null } = {}) 
       // growing it with the zoom is one write, not three.
       const h = heightOf(s.a, tallest);
       const [X, Y] = relief.at(s.x, s.y);
-      const colour = stroke(s.id);
+      const colour = paint(s);
       dot = el('g', {
         class: kind,
         'data-id': s.id,
@@ -235,7 +247,7 @@ export function drawChart(svg, chart, { held = new Set(), relief = null } = {}) 
         cy: s.y,
         r,
         'data-r': r,
-        fill: stroke(s.id),
+        fill: paint(s),
         class: kind,
         'data-id': s.id,
       });
@@ -379,6 +391,14 @@ export function findIn(subjects, query) {
  * @param {() => void} [hooks.opened]  called as it opens, to put anything else away
  * @param {() => boolean} [hooks.relief]  whether to draw it in relief
  * @param {(on: boolean) => void} [hooks.setRelief]  change that, for the map too
+ * @param {(a: string, b: string) => string | null} [hooks.pair]  the chat for two interests, if any
+ * @param {(key: string) => boolean} [hooks.openRoom]  open a chat by its key
+ * @param {(id: string, at: {clientX: number, clientY: number}) => void} [hooks.menu]  the menu for an
+ *   interest, at a point of the window
+ * @param {(id: string) => void} [hooks.branch]  branch the map out into that interest's community
+ * @param {(subjects: string[]) => void} [hooks.joinAll]  join a whole community
+ * @param {(subjects: string[], title: string) => void} [hooks.joinSome]  offer a community
+ *   interest by interest
  */
 export function mountExplorer(doc, hooks) {
   const $ = (id) => doc.getElementById(id);
@@ -411,6 +431,9 @@ export function mountExplorer(doc, hooks) {
   let settling = null;
   const byId = new Map();
   const lit = new Set();
+  // Coloured by community rather than by name, and the one lit, by number.
+  let tinted = false;
+  let showing = null;
   // Every interest's links, and the strongest share there is, for drawing the
   // picked one's in the same weights as the rest; and which are lit as linked.
   let partners = new Map();
@@ -520,7 +543,7 @@ export function mountExplorer(doc, hooks) {
     relief = hooks.relief?.() ? view3d({ turn, tilt }) : null;
     const changed =
       Boolean(was) !== Boolean(relief) || (was && relief && (was.turn !== relief.turn || was.tilt !== relief.tilt));
-    nodes = drawChart(svg, chart, { held: hooks.held(), relief });
+    nodes = drawChart(svg, chart, { held: hooks.held(), relief, tint: tinted });
     orderedFor = relief?.turn ?? null;
     growth = 1;
     placedAt.clear();
@@ -542,6 +565,7 @@ export function mountExplorer(doc, hooks) {
     for (const id of ['explorer-turn-left', 'explorer-turn-right']) if ($(id)) $(id).disabled = !relief;
     $('explorer-relief')?.setAttribute('aria-pressed', String(Boolean(relief)));
     apply();
+    renderCommunities();
     search(find.value);
     if (picked && byId.has(picked)) select(picked);
   }
@@ -549,6 +573,7 @@ export function mountExplorer(doc, hooks) {
   /** What is held has changed: mark it, and say so if it is the one picked. */
   function refresh() {
     if (!chart) return;
+    if (showing !== null) showCommunity(showing);
     const held = hooks.held();
     for (const [id, marks] of nodes) {
       for (const node of marks) node.classList.toggle('mine', held.has(id));
@@ -753,6 +778,17 @@ export function mountExplorer(doc, hooks) {
       const id = tap.target?.closest?.('[data-id]')?.getAttribute('data-id');
       if (id) select(id, { say: true });
     },
+    // The right button, a long press, or the menu key: what can be done with
+    // the interest pressed, or with the one picked when it is the key, which
+    // says nowhere in particular, so the menu comes up in the middle.
+    menu: (at) => {
+      const keyed = at.pointerType === 'keyboard';
+      const id = keyed ? picked : at.target?.closest?.('[data-id]')?.getAttribute('data-id');
+      if (!id) return;
+      const box = boxOf();
+      const where = keyed ? { clientX: box.left + box.width / 2, clientY: box.top + box.height / 2 } : at;
+      hooks.menu?.(id, { clientX: where.clientX, clientY: where.clientY });
+    },
   });
 
   $('explorer-in')?.addEventListener('click', () => zoom(1.6));
@@ -881,10 +917,10 @@ export function mountExplorer(doc, hooks) {
       return b;
     };
     if (held) {
-      button('Open its conversation', () => {
+      button('Open its chat', () => {
         if (hooks.room(id)) close();
-        else $('explorer-people').textContent = 'Its conversation is not on the map yet. Try again in a moment.';
-      }, { primary: true, name: `Open the ${id} conversation` });
+        else $('explorer-people').textContent = 'Its chat is not on the map yet. Try again in a moment.';
+      }, { primary: true, name: `Open the ${id} chat` });
       button('Leave', () => hooks.leave(id), { name: `Leave ${id}` });
     } else {
       button('Join', () => hooks.join(id), { primary: true, name: `Join ${id}` });
@@ -961,6 +997,19 @@ export function mountExplorer(doc, hooks) {
       b.setAttribute('aria-label', `${link.id}, ${both}`);
       b.addEventListener('click', () => choose(link.id));
       li.append(b);
+      // The chat where the two meet, when there is one to open.
+      const pair = hooks.pair?.(id, link.id);
+      if (pair) {
+        const open = doc.createElement('button');
+        open.type = 'button';
+        open.className = 'with-open';
+        open.textContent = 'Open the chat for both';
+        open.setAttribute('aria-label', `Open the chat for ${id} and ${link.id}`);
+        open.addEventListener('click', () => {
+          if (hooks.openRoom?.(pair)) close();
+        });
+        li.append(open);
+      }
       list.append(li);
     }
     $('explorer-with-wrap').hidden = !mine.length;
@@ -968,24 +1017,33 @@ export function mountExplorer(doc, hooks) {
 
   // --- finding one -------------------------------------------------------------
 
-  function search(query) {
-    found.textContent = '';
+  /**
+   * Light these interests and dim the rest: the matches for a search, or the
+   * community picked from the list. A few of them are named wherever they
+   * are; a hundred would bury the sheet, so those wait for the zoom.
+   */
+  function light(ids) {
     for (const id of lit) for (const node of nodes.get(id) ?? []) node.classList.remove('found');
     lit.clear();
-    const matches = chart ? findIn(chart.subjects, query) : [];
-    const searching = Boolean(String(query ?? '').trim());
-    svg.classList.toggle('searching', searching);
-    if (!searching || !chart) return matches;
-
-    // A few matches are named wherever they are; a short query matching
-    // hundreds would bury the sheet in them, so those wait for the zoom.
-    svg.classList.toggle('few', matches.length <= FEW);
-    for (const s of matches) {
-      lit.add(s.id);
-      for (const node of nodes.get(s.id) ?? []) node.classList.add('found');
-      raise(s.id);
+    svg.classList.toggle('searching', ids.length > 0);
+    svg.classList.toggle('few', ids.length > 0 && ids.length <= FEW);
+    for (const id of ids) {
+      lit.add(id);
+      for (const node of nodes.get(id) ?? []) node.classList.add('found');
+      raise(id);
     }
     if (picked) raise(picked);
+  }
+
+  function search(query) {
+    found.textContent = '';
+    const matches = chart ? findIn(chart.subjects, query) : [];
+    const searching = Boolean(String(query ?? '').trim());
+    // Typing is a search for a name, not for a community: the community puts
+    // its light out rather than the two of them fighting over the sheet.
+    if (searching) showing = null;
+    light(searching && chart ? matches.map((s) => s.id) : showing === null ? [] : membersOf(showing));
+    if (!searching || !chart) return matches;
 
     for (const s of matches.slice(0, LISTED)) {
       const li = doc.createElement('li');
@@ -1017,6 +1075,111 @@ export function mountExplorer(doc, hooks) {
     flyTo(id);
     select(id, { say: true });
   }
+
+  // --- communities -----------------------------------------------------------
+
+  /** Every interest in one community, as the chart marks them. */
+  const membersOf = (c) => (chart?.subjects ?? []).filter((s) => s.c === c).map((s) => s.id);
+
+  /** "a, b and c". */
+  const inWords = (names) => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`);
+
+  /**
+   * The communities, biggest first, while the sheet is coloured by them: what
+   * each colour means, and what there is to do with one. They are only worth
+   * listing while the colours say which is which, so the list comes and goes
+   * with the colouring.
+   */
+  function renderCommunities() {
+    const section = $('explorer-communities');
+    if (!section) return;
+    section.hidden = !tinted;
+    const list = $('community-list');
+    list.textContent = '';
+    if (!tinted || !chart?.communities?.length) {
+      showCommunity(null);
+      return;
+    }
+    chart.communities.slice(0, COMMUNITIES_LISTED).forEach((community, c) => {
+      const li = doc.createElement('li');
+      const b = doc.createElement('button');
+      b.type = 'button';
+      b.className = 'community-row';
+      b.dataset.at = String(c);
+      const swatch = doc.createElement('span');
+      swatch.className = 'community-swatch';
+      swatch.style.background = communityColour(c);
+      const name = doc.createElement('span');
+      name.className = 'community-name';
+      name.textContent = inWords(community.name);
+      const n = doc.createElement('span');
+      n.className = 'count';
+      n.textContent = String(community.size);
+      b.append(swatch, name, n);
+      b.setAttribute('aria-label', `${inWords(community.name)}, ${community.size} interests`);
+      b.addEventListener('click', () => {
+        find.value = '';
+        showCommunity(c === showing ? null : c);
+      });
+      li.append(b);
+      list.append(li);
+    });
+    showCommunity(showing);
+  }
+
+  /** One community lit on the sheet and offered, or none of them. */
+  function showCommunity(c) {
+    showing = c === null || !chart?.communities?.[c] ? null : c;
+    for (const row of $('community-list')?.querySelectorAll('.community-row') ?? []) {
+      const on = Number(row.dataset.at) === showing;
+      row.classList.toggle('on', on);
+      row.setAttribute('aria-pressed', String(on));
+    }
+    const actions = $('community-actions');
+    if (actions) actions.hidden = showing === null;
+    if (showing !== null) {
+      const community = chart.communities[showing];
+      const members = membersOf(showing);
+      const held = hooks.held?.() ?? new Set();
+      const mine = members.filter((id) => held.has(id)).length;
+      $('community-picked').textContent = inWords(community.name);
+      $('community-held').textContent = mine
+        ? `${mine} of ${members.length} already yours`
+        : `${members.length} interests, none of them yours yet`;
+      $('community-join-all').disabled = mine === members.length;
+      $('community-join-some').disabled = mine === members.length;
+    }
+    search(find.value);
+  }
+
+  /** The community that is lit, its interests, and what it is called. */
+  const offered = () => ({
+    subjects: showing === null ? [] : membersOf(showing),
+    title: showing === null ? '' : inWords(chart.communities[showing].name),
+    lead: showing === null ? null : chart.communities[showing].name[0],
+  });
+
+  $('explorer-tint')?.addEventListener('click', () => {
+    tinted = !tinted;
+    $('explorer-tint').setAttribute('aria-pressed', String(tinted));
+    if (!tinted) showing = null;
+    draw();
+  });
+
+  $('community-branch')?.addEventListener('click', () => {
+    const { lead } = offered();
+    if (lead) hooks.branch?.(lead);
+  });
+
+  $('community-join-all')?.addEventListener('click', () => {
+    const { subjects } = offered();
+    if (subjects.length) hooks.joinAll?.(subjects);
+  });
+
+  $('community-join-some')?.addEventListener('click', () => {
+    const { subjects, title } = offered();
+    if (subjects.length) hooks.joinSome?.(subjects, title);
+  });
 
   find.addEventListener('input', () => search(find.value));
   find.addEventListener('keydown', (evt) => {

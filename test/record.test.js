@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { parseHTML } from 'linkedom';
 import { identity, seal, unseal } from '../lib/seal.js';
 import { World, seed } from '../server/store.js';
+import { communityColour } from '../lib/palette.js';
 import { challenge } from '../lib/proof.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -715,7 +716,12 @@ test('the interests are a dialog, opened from the header or the bar along the bo
   assert.match(client.$('subjects').textContent, /art/, 'and the list is drawn whether or not it is open');
 
   const openers = [...client.document.querySelectorAll('.interests-open')];
-  assert.deepEqual(openers.map((b) => Boolean(b.closest('.bar')) || Boolean(b.closest('#switch'))), [true, true]);
+  // In the header, in the bar along the bottom, and in the note on the map,
+  // where it is the first thing the note says to do.
+  assert.deepEqual(
+    openers.map((b) => (b.closest('.bar') ? 'bar' : b.closest('#switch') ? 'switch' : b.closest('#lede') ? 'lede' : '?')).sort(),
+    ['bar', 'lede', 'switch'],
+  );
   for (const opener of openers) {
     // Not `false` to begin with: this DOM has no dialogs, so the page's own
     // fallback is what sets it at all.
@@ -733,6 +739,18 @@ test('the interests are a dialog, opened from the header or the bar along the bo
   );
 });
 
+test('the demo says so in the header, and nowhere else does', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  const pill = client.document.querySelector('.demo-pill');
+  assert.ok(pill, 'the label is on the page');
+  assert.match(pill.textContent, /made up/);
+  assert.equal(client.document.body.dataset.demo, undefined, 'an ordinary server is not a demo');
+  client.emit({ type: 'welcome', you: { id: 'u1', name: 'guest' }, maxArity: 10, demo: true });
+  assert.equal(client.document.body.dataset.demo, '', 'the demo says it is one');
+  assert.notEqual(pill.getAttribute('aria-hidden'), 'true', 'and it is read out, not only shown');
+});
+
 test('the settings are one menu in the header, and the theme is a label beside it', async () => {
   const client = await loadClient();
   arrive(client.emit);
@@ -741,8 +759,12 @@ test('the settings are one menu in the header, and the theme is a label beside i
   const bar = client.document.querySelector('.bar');
 
   assert.ok(bar.contains(menu), 'the menu hangs from the header');
-  for (const id of ['bell', 'swap-sides', 'float-map', 'reset-layout', 'check-deletions', 'new-key']) {
+  for (const id of ['bell', 'recording', 'check-deletions', 'new-key']) {
     assert.ok(menu.contains(client.$(id)), `#${id} should be in Settings`);
+  }
+  // Where the map sits is with how it is drawn, under View.
+  for (const id of ['swap-sides', 'float-map', 'reset-layout']) {
+    assert.ok(client.$('view-pop').contains(client.$(id)), `#${id} should be under View`);
   }
 
   // The theme is in the header itself, in words, saying which one is on.
@@ -893,7 +915,7 @@ test('opening a room you are not in offers the way in, and names only what is mi
   clickRoom(client, 'philosophy');
   let prompt = client.document.querySelector('.joining');
   assert.ok(prompt, 'a room you are not in should offer a way in');
-  assert.match(prompt.textContent, /You are not in this conversation/);
+  assert.match(prompt.textContent, /You are not in this chat/);
   assert.deepEqual(
     [...prompt.querySelectorAll('.join-here')].map((b) => b.textContent),
     ['Join philosophy'],
@@ -1178,7 +1200,7 @@ test('coming back to a group holds its conversation again, and opens nothing', a
   assert.match(client.$('notice').textContent, /^$/, 'without announcing it as a new arrival');
 
   inGroupRoom(client.emit, 'moss-lark-42', 2);
-  assert.equal(client.$('room-title').textContent, 'Pick a conversation', 'nor opening it');
+  assert.equal(client.$('room-title').textContent, 'Pick a chat', 'nor opening it');
 });
 
 test('leaving a group leaves every conversation in it', async () => {
@@ -1608,7 +1630,7 @@ test('the buttons carry icons, every icon exists, and they stay when the words c
 
   const buttons = [
     'interests-open', 'group-open', 'settings-open', 'appearance-open', 'bell', 'swap-sides', 'reset-layout',
-    'check-deletions', 'new-key', 'room-share', 'send', 'rooms-open', 'map-expand', 'view-open', 'refit',
+    'check-deletions', 'new-key', 'room-share', 'send', 'rooms-open', 'room-list', 'map-expand', 'view-open', 'refit',
     'tip-show', 'lede-close', 'interests-close', 'create', 'map-close', 'appearance-close', 'cluster-new',
     'cluster-copy', 'cluster-leave', 'lurk-join', 'lurk-leave', 'room-share-copy',
     'float-map', 'map-popout', 'map-grip', 'dock-left', 'dock-right', 'explore-open-map',
@@ -1709,7 +1731,7 @@ test('Explore sits beside Conversations on the map, and goes to the same place',
   assert.equal(button.parentNode, client.$('rooms-open').parentNode, 'beside Conversations');
   assert.equal(button.previousElementSibling, client.$('rooms-open'), 'and straight after it');
   // Named whatever the width does to its words.
-  assert.equal(button.getAttribute('aria-label'), 'Explore all interests');
+  assert.equal(button.getAttribute('aria-label'), 'Explore interests');
 
   click(client, 'explore-open-map');
   assert.ok(client.$('explorer').open, 'pressing it opens every interest');
@@ -1804,7 +1826,7 @@ test('an interest is found by typing, and joined or opened from beside the sheet
     funnel: 0,
     rail: { held: ['art', 'chess'], suggested: [], popular: [], total: 2 },
   });
-  assert.deepEqual(actions().map((b) => b.textContent), ['Open its conversation', 'Leave', 'Browse games']);
+  assert.deepEqual(actions().map((b) => b.textContent), ['Open its chat', 'Leave', 'Browse games']);
   assert.ok(sheet.querySelector('.dot[data-id="chess"]').classList.contains('mine'));
   assert.equal(client.socket.sent.filter((f) => f.type === 'chart').length, asked + 1);
 
@@ -1836,7 +1858,7 @@ test('pressing a dot picks it, and dragging the sheet does not', async () => {
 
   // Held, so its conversation is one press away, and the sheet gets out of it.
   const open = client.$('explorer-actions').querySelector('button');
-  assert.equal(open.textContent, 'Open its conversation');
+  assert.equal(open.textContent, 'Open its chat');
   open.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
   assert.ok(!client.$('explorer').open);
   assert.equal(client.$('room-title').textContent, 'art');
@@ -2481,4 +2503,591 @@ test('poking the server shows its answer to the poker alone, and it can be used 
   client.emit({ type: 'poked', room: 'art', about: ['art'], text: 'Another question?', machine: true });
   click(client, 'poke-close');
   assert.equal(client.$('poke-reply').hidden, true);
+});
+
+// --- the reorganised page ------------------------------------------------------------
+
+test('the list of chats puts yours first, busiest first, under headings that are not buttons', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  outsideRooms(client.emit, ['art']);
+  const items = [...client.$('rooms').children];
+  const heads = items.filter((li) => li.classList.contains('rooms-group')).map((li) => li.textContent);
+  assert.deepEqual(heads, ['Yours', 'Others on this map']);
+  assert.equal(items[0].textContent, 'Yours', 'yours first');
+  assert.equal(client.$('rooms').querySelectorAll('.rooms-group button').length, 0, 'a heading is words, not a button');
+  const chips = [...client.$('rooms').querySelectorAll('.room-chip')].map((b) => b.getAttribute('aria-label').split(',')[0]);
+  assert.equal(chips[0], 'art', 'the one you are in, first');
+  // Among the rest, the busier first: philosophy's three before the pair's two.
+  assert.deepEqual(chips.slice(1), ['philosophy', 'art and philosophy']);
+  assert.match(client.$('rooms-head').textContent, /Chats · 3/, 'and how many, at the head of the list');
+});
+
+test('on a phone, a chat has a way back to the list of chats', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  clickRoom(client, 'art');
+  click(client, 'room-list');
+  assert.equal(client.document.body.dataset.view, 'map', 'back on the map');
+  assert.equal(client.$('rooms-open').getAttribute('aria-expanded'), 'true', 'with the list open');
+  assert.equal(client.$('rooms-pop').hidden, false);
+});
+
+test('a message keeps reply in front and the rest in a tray behind ⋯', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  clickRoom(client, 'art');
+  client.emit(said({ id: 'm1', body: 'hello', ...wren }));
+  client.emit({ type: 'votes', messageId: 'm1', up: 2, down: 1, score: 1 });
+  const li = [...client.document.querySelectorAll('#log li')].find((n) => n.textContent.includes('hello'));
+  const head = li.firstElementChild;
+  const reply = head.querySelector('.msg-action.reply');
+  const more = head.querySelector('.msg-more');
+  const tray = head.querySelector('.msg-actions');
+  assert.ok(reply && more && tray, 'reply, ⋯ and the tray');
+  assert.ok(reply.compareDocumentPosition(more) & 4, 'reply before ⋯');
+  assert.equal(more.getAttribute('aria-controls'), tray.id);
+  // In the tray, the lighter things first and the ones that cannot be undone last.
+  const order = [...tray.querySelectorAll('button')].map((b) => b.className.split(' ').pop());
+  assert.deepEqual(order, ['vote-up', 'vote-down', 'mute', 'report']);
+  // The counts are in the heading too, without opening anything.
+  assert.equal(head.querySelector('.vote-tally')?.textContent, '2 agree · 1 disagree');
+
+  more.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  assert.equal(more.getAttribute('aria-expanded'), 'true');
+  assert.ok(tray.classList.contains('open'));
+
+  // The reasons for a report open under the words, not inside the heading.
+  tray.querySelector('.report').dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  const why = client.document.querySelector('.why');
+  assert.ok(why && !head.contains(why), 'not in the heading');
+  assert.equal(why.previousElementSibling?.className, 'text', 'under the message');
+});
+
+// --- the recommended additions -----------------------------------------------------
+
+/** The map as it comes back with chats of yours it does not draw, and one lively chat. */
+const withOffMap = (emit) => {
+  const stats = { messages: 0, perMinute: 0, last: null };
+  emit({
+    type: 'atlas',
+    subjects: ['art', 'philosophy'],
+    extent: 1000,
+    zones: [{ key: 'art', subjects: ['art'], population: 4, x: 0, y: 0, room: 60, seed: { x: 0, y: 0 } }],
+    curves: [{ subject: 'art', components: 1, anchor: { x: 0, y: 0, room: 60 }, loops: [[[-60, -60], [60, -60], [60, 60], [-60, 60]]] }],
+    network: [],
+    report: { exact: true, phantoms: 0, vanished: 0, worstError: 0, disconnected: [], worstSplit: 1, wellFormed: true },
+    subscription: ['art', 'chess', 'philosophy'],
+    rooms: [
+      { key: 'art', subjects: ['art'], population: 4, here: 4, member: true, messages: 0, stats, activity: 0.1 },
+      { key: 'philosophy', subjects: ['philosophy'], population: 3, here: 3, member: true, messages: 0, stats, activity: 0.9 },
+      { key: 'art+philosophy', subjects: ['art', 'philosophy'], population: 2, here: 2, member: true, messages: 0, stats, activity: 0 },
+      { key: 'chess', subjects: ['chess'], population: 7, here: 0, member: true, messages: 0, stats, activity: 0.05, offMap: true },
+    ],
+  });
+};
+
+test('every chat of yours is listed, drawn on the map or not, the lively ones first', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  withOffMap(client.emit);
+  const heads = [...client.$('rooms').querySelectorAll('.rooms-group')].map((h) => h.textContent);
+  assert.deepEqual(heads, ['Lively now', 'Yours']);
+  const chess = [...client.document.querySelectorAll('.room-chip')].find((c) => c.getAttribute('aria-label').startsWith('chess,'));
+  assert.ok(chess, 'a chat the map does not draw is still listed');
+  assert.ok(chess.classList.contains('off-map'));
+  assert.match(chess.getAttribute('aria-label'), /not on the map/);
+  const lively = client.$('rooms').children[1].querySelector('.room-chip');
+  assert.match(lively.getAttribute('aria-label'), /^philosophy,/, 'the liveliest first');
+
+  // And it opens like any other.
+  clickRoom(client, 'chess');
+  assert.equal(client.$('room-title').textContent, 'chess');
+});
+
+test('a chat can be pinned to the top of the list, and stays pinned next time', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  withOffMap(client.emit);
+  clickRoom(client, 'chess');
+  assert.equal(client.$('room-pin').hidden, false);
+  click(client, 'room-pin');
+  assert.equal(client.$('room-pin').getAttribute('aria-pressed'), 'true');
+  assert.deepEqual(JSON.parse(client.store.get('eulerchat.pinned')), ['chess']);
+  assert.equal(client.$('rooms').firstElementChild.textContent, 'Pinned');
+  assert.match(client.$('rooms').children[1].querySelector('.room-chip').getAttribute('aria-label'), /^chess,.*pinned/);
+
+  const again = await loadClient({ storage: { 'eulerchat.pinned': '["chess"]' } });
+  arrive(again.emit);
+  withOffMap(again.emit);
+  assert.equal(again.$('rooms').firstElementChild.textContent, 'Pinned', 'remembered in this browser');
+});
+
+test('joining a first interest opens the busiest chat it put you in', async () => {
+  const client = await loadClient();
+  client.emit({ type: 'welcome', you: { id: 'u1', name: 'guest' }, maxArity: 3 });
+  client.emit({ type: 'history', rooms: {} });
+  client.emit({ type: 'state', subscription: [], funnel: 0, rail: { held: [], suggested: [], popular: [], total: 0 } });
+  assert.equal(client.$('room-title').textContent, 'Pick a chat');
+  client.emit({
+    type: 'state',
+    subscription: ['art', 'chess', 'philosophy'],
+    funnel: 0,
+    rail: { held: ['art', 'chess', 'philosophy'], suggested: [], popular: [], total: 3 },
+  });
+  withOffMap(client.emit);
+  assert.equal(client.$('room-title').textContent, 'philosophy', 'the liveliest of theirs, opened');
+});
+
+test('an empty chat asks the server for a question to start it, once', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  const pokes = () => client.socket.sent.filter((f) => f.type === 'poke');
+  clickRoom(client, 'art');
+  assert.deepEqual(pokes(), [{ type: 'poke', room: 'art' }]);
+  client.emit({ type: 'poked', room: 'art', about: ['art'], text: 'What got you into art?', machine: true });
+  assert.equal(client.$('poke-text').textContent, 'What got you into art?');
+  // Drawn again, as it is for everything, it does not ask again.
+  client.emit({ type: 'unread', counts: {} });
+  clickRoom(client, 'art');
+  assert.equal(pokes().length, 1);
+});
+
+test('the lurk bar says what joining in would add, and how busy it is', async () => {
+  const client = await loadClient({ href: 'http://localhost:8787/?watch=art%2Bphilosophy' });
+  client.emit({ type: 'welcome', you: { id: 'u9', name: 'guest-9' }, maxArity: 3 });
+  client.emit({
+    type: 'watching',
+    room: 'art+philosophy',
+    subjects: ['art', 'philosophy'],
+    population: 12,
+    stats: { messages: 4, perMinute: 0.6, last: null },
+    messages: [],
+    lurkers: 1,
+  });
+  assert.equal(
+    client.$('lurk-adds').textContent,
+    'Join in adds art and philosophy to your interests. 12 people are in it, saying about 0.6 a minute lately.',
+  );
+  assert.equal(client.$('room-pin').hidden, true, 'and a lurker pins nothing');
+});
+
+test('a moderator has reports in Settings, and can look in or clear each', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  assert.equal(client.$('moderation').hidden, true, 'nobody else sees it');
+  client.emit({ type: 'welcome', you: { id: 'u1', name: 'guest' }, maxArity: 3, moderator: true });
+  assert.equal(client.$('moderation').hidden, false);
+
+  click(client, 'reports-open');
+  assert.ok(client.$('reports').open);
+  assert.ok(client.socket.sent.some((f) => f.type === 'concerns'));
+  client.emit({
+    type: 'concerns',
+    rooms: [{ room: 'art', subjects: ['art'], reports: [{ reason: 'spam', at: 1 }, { reason: 'spam', at: 2 }], messages: 3, flags: 0, population: 4 }],
+  });
+  const row = client.$('reports-list').querySelector('.report-row');
+  assert.match(row.textContent, /art/);
+  assert.match(row.querySelector('.report-why').textContent, /\(2\)/, 'why, and how often');
+  assert.equal(client.$('reports-count').textContent, '1');
+  const [, clear] = row.querySelectorAll('button');
+  clear.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  assert.deepEqual(client.socket.sent.at(-1), { type: 'clear', room: 'art' });
+});
+
+test('All interests offers the chat for both of an interest and one often held with it', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  outsideRooms(client.emit, ['art', 'philosophy']);
+  click(client, 'explore-open');
+  const chart = await stockedChart();
+  client.emit({ type: 'chart', ...chart, links: [['art', 'philosophy', 2, 0.5]] });
+  const find = client.$('explorer-find');
+  find.value = 'art';
+  find.dispatchEvent(Object.assign(new client.document.defaultView.Event('keydown'), { key: 'Enter' }));
+  const open = client.$('explorer-with').querySelector('.with-open');
+  assert.ok(open, 'offered where the two meet');
+  assert.equal(open.getAttribute('aria-label'), 'Open the chat for art and philosophy');
+  open.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  assert.ok(!client.$('explorer').open, 'and the sheet gets out of the way');
+  assert.equal(client.$('room-title').textContent, 'art and philosophy');
+});
+
+test('a chat that changes beside the map does not redraw the map', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  withOffMap(client.emit);
+  const drawn = client.$('diagram').firstElementChild;
+  withOffMap((frame) => client.emit({ ...frame, rooms: frame.rooms.map((r) => (r.offMap ? { ...r, activity: 0.8 } : r)) }));
+  assert.equal(client.$('diagram').firstElementChild, drawn);
+});
+
+// --- corrections -------------------------------------------------------------------
+
+test('a room opening is not an unread message on the page either', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  client.emit({
+    type: 'notification',
+    notification: { kind: 'room-opened', level: 'notify', room: 'art', subjects: ['art'], at: 1, title: 'art now exists', body: '' },
+  });
+  assert.equal(client.$('rooms-waiting').hidden, true, 'no badge');
+  client.emit({
+    type: 'notification',
+    notification: { kind: 'message', level: 'notify', room: 'art', subjects: ['art'], at: 2, title: 'art', body: 'hi' },
+  });
+  assert.equal(client.$('rooms-waiting').textContent, '1', 'a message still is');
+});
+
+test('an interest is counted by everybody holding it, as its chat is', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  // The zone is the people holding art and nothing else drawn; the room is
+  // everybody holding art. The list of interests used to show the first.
+  const stats = { messages: 0, perMinute: 0, last: null };
+  client.emit({
+    type: 'atlas',
+    subjects: ['art', 'philosophy'],
+    extent: 1000,
+    zones: [
+      { key: 'art', subjects: ['art'], population: 3, x: 0, y: 0, room: 60, seed: { x: 0, y: 0 } },
+      { key: 'art+philosophy', subjects: ['art', 'philosophy'], population: 6, x: 0, y: 0, room: 60, seed: { x: 0, y: 0 } },
+    ],
+    curves: [{ subject: 'art', components: 1, anchor: { x: 0, y: 0, room: 60 }, loops: [[[-60, -60], [60, -60], [60, 60], [-60, 60]]] }],
+    network: [],
+    report: { exact: true, phantoms: 0, vanished: 0, worstError: 0, disconnected: [], worstSplit: 1, wellFormed: true },
+    subscription: ['art'],
+    rooms: [
+      { key: 'art', subjects: ['art'], population: 9, here: 3, member: true, messages: 0, stats },
+      { key: 'art+philosophy', subjects: ['art', 'philosophy'], population: 6, here: 6, member: false, messages: 0, stats },
+    ],
+  });
+  const row = [...client.document.querySelectorAll('#subjects li')].find((li) => li.querySelector('.name')?.textContent === 'art');
+  assert.equal(row.querySelector('.count').textContent, '9');
+  const chip = [...client.document.querySelectorAll('.room-chip')].find((c) => c.getAttribute('aria-label').startsWith('art,'));
+  assert.match(chip.getAttribute('aria-label'), /^art, 9 people/, 'the same number in both lists');
+});
+
+// --- the menu, and branching out into a community ------------------------------------
+
+/** A world where the same people hold music together, and code together, and a few hold both. */
+const communityWorld = () => {
+  const world = new World();
+  for (const s of ['guitar', 'piano', 'drums', 'singing', 'python', 'rust', 'haskell', 'go']) world.addSubject(s);
+  const hold = (name, subjects) => {
+    const id = world.addUser(name);
+    for (const s of subjects) world.join(id, s);
+    return id;
+  };
+  for (let i = 0; i < 6; i++) hold(`band${i}`, ['guitar', 'piano', 'drums', 'singing'].filter((_, j) => (i + j) % 4 !== 0));
+  for (let i = 0; i < 6; i++) hold(`coder${i}`, ['python', 'rust', 'haskell', 'go'].filter((_, j) => (i + j) % 4 !== 0));
+  hold('both', ['drums', 'python']);
+  hold('both too', ['drums', 'python']);
+  const me = hold('me', ['guitar']);
+  return { world, me };
+};
+
+/** Their own map, holding guitar, drawn. */
+const guitarMap = (client) => {
+  const { world, me } = communityWorld();
+  const view = world.atlasFor(me, 3);
+  client.emit({ type: 'state', subscription: view.subscription, funnel: 0, rail: { held: view.subscription, suggested: [], popular: [], total: 1 } });
+  client.emit({ type: 'atlas', ...view });
+  return { world, me, view };
+};
+
+const mouse = (client, target, type, extra = {}) =>
+  target.dispatchEvent(
+    Object.assign(new client.document.defaultView.Event(type, { bubbles: true, cancelable: true }), {
+      pointerId: 7,
+      clientX: 40,
+      clientY: 50,
+      button: 0,
+      pointerType: 'mouse',
+      ...extra,
+    }),
+  );
+const rightClick = (client, target) => {
+  mouse(client, target, 'pointerdown', { button: 2 });
+  mouse(client, target, 'pointerup', { button: 2 });
+};
+const menuOf = (client) => client.document.querySelector('.context-menu');
+const menuItem = (client, label) =>
+  [...(menuOf(client)?.querySelectorAll('.menu-item') ?? [])].find((b) => b.querySelector('.menu-label').textContent === label);
+const groundOf = (client, key) =>
+  client.$('diagram').querySelector(`.zone-ground[data-zone="${key}"]`) ?? topOf(client, key)?.querySelector('.zone-ground');
+
+test('a right click on a chat on the map offers it, and ways to branch out from it', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  const { view } = guitarMap(client);
+  assert.ok(view.communities.guitar, 'the map says which community guitar is in');
+
+  rightClick(client, groundOf(client, 'guitar'));
+  const menu = menuOf(client);
+  assert.ok(menu, 'a menu, not the browser’s');
+  assert.equal(menu.getAttribute('role'), 'menu');
+  assert.equal(menu.querySelector('.menu-title').textContent, 'guitar');
+  assert.ok(menuItem(client, 'Open the chat'));
+  assert.ok(menuItem(client, 'Copy quick-join link'));
+  assert.ok(menuItem(client, 'Branch out from guitar'), 'into its own community');
+  assert.match(menuItem(client, 'Branch out from guitar').querySelector('.menu-detail').textContent, /^Into .*guitar.* · \d+ interests$/);
+  const toward = [...menu.querySelectorAll('.menu-item')].find((b) => b.querySelector('.menu-label').textContent.startsWith('Toward '));
+  assert.ok(toward, 'and toward the one next door');
+  assert.ok(menuItem(client, 'Reset view'), 'and the map’s own');
+
+  menuItem(client, 'Open the chat').dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  assert.equal(menuOf(client), null, 'choosing shuts it');
+  assert.equal(client.$('room-title').textContent, 'guitar');
+});
+
+test('branching out draws the community in place of their own map, until they go back', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  const { world, me, view } = guitarMap(client);
+  rightClick(client, groundOf(client, 'guitar'));
+  menuItem(client, 'Branch out from guitar').dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+
+  const asked = client.socket.sent.filter((f) => f.type === 'branch').at(-1);
+  assert.deepEqual({ from: asked.from, toward: asked.toward }, { from: 'guitar', toward: null });
+  assert.equal(client.$('branch-bar').hidden, false);
+  assert.equal(client.$('branch-what').textContent, 'Branching out from guitar…');
+
+  const branch = world.branchFor(me, 'guitar', { limit: asked.subjects });
+  client.emit({ type: 'branch', ...branch });
+  const drawn = new Set([...client.$('diagram').querySelectorAll('[data-zone]')].map((z) => z.getAttribute('data-zone')));
+  assert.ok([...drawn].some((k) => k.includes('piano')), 'the community is on the map');
+  assert.match(client.$('branch-what').textContent, /^From guitar into .*piano/);
+  assert.match(client.$('fit').textContent, /^Branched out · /);
+  // Its chats are there to open, as chats they are not in yet.
+  const outside = branch.rooms.find((r) => !r.member);
+  const chip = [...client.document.querySelectorAll('.room-chip')].find((c) => c.getAttribute('aria-label').startsWith(`${outside.subjects.join(' and ')},`));
+  assert.ok(chip, 'listed with the rest');
+  chip.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  assert.ok(client.$('log').querySelector('.joining'), 'and opened with the way in');
+
+  // Their own map, while branched, is kept for the list and not drawn.
+  client.emit({ type: 'atlas', ...view });
+  assert.ok([...client.$('diagram').querySelectorAll('[data-zone]')].some((z) => z.getAttribute('data-zone').includes('piano')), 'still the branch');
+
+  // And back.
+  click(client, 'branch-back');
+  assert.equal(client.$('branch-bar').hidden, true);
+  const home = [...client.$('diagram').querySelectorAll('[data-zone]')].map((z) => z.getAttribute('data-zone'));
+  assert.deepEqual([...new Set(home)].sort(), [...new Set(view.zones.map((z) => z.key))].sort(), 'their own map again');
+  // A branch that arrives late, for where they no longer are, is let go.
+  client.emit({ type: 'branch', ...branch });
+  assert.equal(client.$('branch-bar').hidden, true);
+});
+
+test('a branch with nothing in it says so and goes back', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  guitarMap(client);
+  rightClick(client, groundOf(client, 'guitar'));
+  menuItem(client, 'Branch out from guitar').dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  client.emit({ type: 'branch', none: true, from: 'guitar', toward: null });
+  assert.equal(client.$('branch-bar').hidden, true);
+  assert.match(client.$('notice').textContent, /Nothing to branch into from guitar/);
+});
+
+test('a chat in the list has the same menu, and pins from it; Escape shuts it', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  guitarMap(client);
+  const chip = [...client.document.querySelectorAll('.room-chip')].find((c) => c.getAttribute('aria-label').startsWith('guitar,'));
+  chip.focus();
+  // The keyboard's menu key: nowhere in particular.
+  chip.dispatchEvent(new client.document.defaultView.Event('contextmenu', { bubbles: true, cancelable: true }));
+  assert.ok(menuOf(client));
+  assert.equal(menuItem(client, 'Reset view'), undefined, 'the chat’s, not the map’s');
+  const pin = menuItem(client, 'Pin to the top');
+  assert.equal(pin.getAttribute('role'), 'menuitemcheckbox');
+  assert.equal(pin.getAttribute('aria-checked'), 'false');
+  pin.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  assert.deepEqual(JSON.parse(client.store.get('eulerchat.pinned')), ['guitar']);
+
+  const again = [...client.document.querySelectorAll('.room-chip')].find((c) => c.getAttribute('aria-label').startsWith('guitar,'));
+  again.focus();
+  again.dispatchEvent(new client.document.defaultView.Event('contextmenu', { bubbles: true, cancelable: true }));
+  assert.equal(menuItem(client, 'Pinned to the top').getAttribute('aria-checked'), 'true', 'and says so');
+  // Escape shuts it; the arrows and the focus are in `test/menu.test.js`,
+  // which keeps track of what has the focus, as linkedom does not.
+  menuOf(client).dispatchEvent(
+    Object.assign(new client.document.defaultView.Event('keydown', { bubbles: true, cancelable: true }), { key: 'Escape' }),
+  );
+  assert.equal(menuOf(client), null);
+});
+
+test('the map pressed where there is no chat has the map’s own menu', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  guitarMap(client);
+  rightClick(client, client.$('diagram'));
+  assert.equal(menuOf(client).querySelector('.menu-title').textContent, 'Map');
+  assert.ok(menuItem(client, 'Explore interests'));
+  assert.equal(menuItem(client, 'Heights').getAttribute('aria-checked'), 'true');
+  menuItem(client, 'Heights').dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  assert.equal(client.$('relief').getAttribute('aria-pressed'), 'false', 'laid flat');
+});
+
+test('an interest in All interests can be joined or branched out from, with the menu inside the sheet', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  const { world } = guitarMap(client);
+  click(client, 'explore-open');
+  client.emit({ type: 'chart', ...world.chart() });
+  const piano = client.$('explorer-chart').querySelector('[data-id="piano"]');
+  rightClick(client, piano);
+  const menu = menuOf(client);
+  assert.ok(menu);
+  assert.equal(menu.parentElement, client.$('explorer'), 'inside the sheet, which is modal');
+  assert.ok(menuItem(client, 'Join piano'));
+  const branch = menuItem(client, 'Branch out from piano');
+  assert.ok(branch, 'from what All interests says of it');
+  branch.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  assert.ok(!client.$('explorer').open, 'the sheet makes way for the map');
+  assert.equal(client.socket.sent.filter((f) => f.type === 'branch').at(-1).from, 'piano');
+});
+
+test('the branch bar offers the community: all of it, or the part of it you pick', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  const { world, me } = guitarMap(client);
+  rightClick(client, groundOf(client, 'guitar'));
+  menuItem(client, 'Branch out from guitar').dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  const branch = world.branchFor(me, 'guitar', { limit: 3 });
+  client.emit({ type: 'branch', ...branch });
+
+  const members = branch.branch.community.members;
+  assert.ok(members.length > 3, 'the whole community, not only what is drawn');
+  assert.match(client.$('branch-size').textContent, /interests, 1 yours$/, 'how much of it is already theirs');
+  assert.equal(client.$('branch-join-all').hidden, false);
+  assert.equal(client.$('branch-join-all').querySelector('.label').textContent, `Join all ${members.length - 1}`);
+
+  // Some of it: a switch each, the ones already held on and fixed.
+  click(client, 'branch-join-some');
+  assert.ok(client.$('join-some').open);
+  assert.equal(client.$('join-some-title').textContent, `Join some of ${branch.branch.community.name.join(', ').replace(/, ([^,]*)$/, ' and $1')}`);
+  const switches = [...client.$('join-some-list').querySelectorAll('.switch-row')];
+  assert.deepEqual(switches.map((b) => b.querySelector('.switch-name').textContent).sort(), [...members].sort());
+  const guitar = switches.find((b) => b.querySelector('.switch-name').textContent === 'guitar');
+  assert.equal(guitar.getAttribute('aria-checked'), 'true');
+  assert.equal(guitar.disabled, true, 'what is already theirs is not switched off here');
+  assert.equal(client.$('join-some-count').textContent, `Join ${members.length - 1} interests`);
+
+  // Switched off, it is not joined.
+  const off = switches.find((b) => !b.disabled);
+  off.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  assert.equal(off.getAttribute('aria-checked'), 'false');
+  assert.equal(client.$('join-some-count').textContent, `Join ${members.length - 2} interests`);
+  click(client, 'join-some-go');
+  const asked = client.socket.sent.filter((f) => f.type === 'join').at(-1);
+  assert.equal(asked.subjects.length, members.length - 2, 'one ask for all of them');
+  assert.ok(!asked.subjects.includes('guitar'), 'and not what is already theirs');
+  assert.ok(!asked.subjects.includes(off.querySelector('.switch-name').textContent));
+  assert.equal(client.$('join-some').open, false);
+
+  // Or all of it, in one go.
+  click(client, 'branch-join-all');
+  const all = client.socket.sent.filter((f) => f.type === 'join').at(-1);
+  assert.deepEqual([...all.subjects].sort(), members.filter((s) => s !== 'guitar').sort());
+});
+
+test('All interests can be coloured by community, which lists them and offers each', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  const { world } = guitarMap(client);
+  click(client, 'explore-open');
+  const chart = world.chart();
+  client.emit({ type: 'chart', ...chart });
+  // In relief each interest is a column, and its colour is on the top of it.
+  const fillOf = (id) => {
+    const node = client.$('explorer-chart').querySelector(`[data-id="${id}"]`);
+    return (node.querySelector?.('.column-top') ?? node).getAttribute('fill');
+  };
+  const ownColours = ['guitar', 'piano'].map(fillOf);
+  assert.notEqual(ownColours[0], ownColours[1], 'by name to begin with');
+
+  click(client, 'explorer-tint');
+  assert.equal(client.$('explorer-tint').getAttribute('aria-pressed'), 'true');
+  const c = chart.subjects.find((s) => s.id === 'guitar').c;
+  assert.equal(fillOf('guitar'), communityColour(c));
+  assert.equal(fillOf('piano'), communityColour(c), 'what the same people hold is one colour');
+  assert.notEqual(fillOf('python'), communityColour(c), 'and another community is another colour');
+
+  // Listed, biggest first, with what each is called.
+  assert.equal(client.$('explorer-communities').hidden, false);
+  const rows = [...client.$('community-list').querySelectorAll('.community-row')];
+  assert.equal(rows.length, chart.communities.length);
+  assert.equal(rows[c].querySelector('.community-name').textContent, chart.communities[c].name.join(', ').replace(/, ([^,]*)$/, ' and $1'));
+  assert.equal(rows[c].querySelector('.count').textContent, String(chart.communities[c].size));
+
+  // Picked, it lights up and is offered.
+  rows[c].dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  assert.equal(client.$('community-actions').hidden, false);
+  assert.match(client.$('community-held').textContent, /^1 of \d+ already yours$/);
+  const lit = [...client.$('explorer-chart').querySelectorAll('.chart-dot.found, .found[data-id]')].map((n) => n.getAttribute('data-id'));
+  assert.ok(lit.includes('guitar') && lit.includes('piano'), 'lit on the sheet');
+  assert.ok(!lit.includes('python'), 'and nothing else is');
+
+  // Joined whole, from here.
+  click(client, 'community-join-all');
+  const asked = client.socket.sent.filter((f) => f.type === 'join').at(-1);
+  assert.ok(asked.subjects.includes('piano') && !asked.subjects.includes('guitar'));
+
+  // Or branched into, on the map.
+  click(client, 'community-branch');
+  assert.equal(client.$('explorer').open, false, 'the sheet makes way for the map');
+  assert.equal(client.socket.sent.filter((f) => f.type === 'branch').at(-1).from, chart.communities[c].name[0]);
+
+  // Switched off, the sheet goes back to a colour per interest.
+  click(client, 'explore-open');
+  click(client, 'explorer-tint');
+  assert.equal(client.$('explorer-communities').hidden, true);
+  assert.deepEqual(['guitar', 'piano'].map(fillOf), ownColours);
+});
+
+test('what the server writes can be muted, and is then folded away and not counted', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  clickRoom(client, 'art');
+  const press = (node) => node.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  client.emit(said({ author: 'p12', authorId: 'id-p12', id: 'q1', body: 'What got you into art?', machine: true }));
+  client.emit(said({ ...wren, id: 'm1', body: 'the underpainting, mostly' }));
+  const lines = () => [...client.document.querySelectorAll('#log li')].map((li) => li.textContent);
+  assert.equal(lines().length, 2);
+  assert.match(lines()[0], /system message/);
+
+  // Muted: folded into one line that says where it came from, as a muted
+  // person's messages are, and the server is told to stop counting them.
+  assert.equal(client.$('hush-system').getAttribute('aria-pressed'), 'false');
+  press(client.$('hush-system'));
+  assert.equal(client.$('hush-system').getAttribute('aria-pressed'), 'true');
+  assert.equal(client.$('hush-system').querySelector('.label').textContent, 'System messages muted');
+  assert.deepEqual(client.socket.sent.at(-1), { type: 'notifications', settings: { system: false } });
+  const folded = client.document.querySelector('#log .muted-run');
+  assert.ok(folded, 'folded away');
+  assert.match(folded.textContent, /A message from the server/);
+  assert.match(lines().at(-1), /the underpainting/, 'and a person is untouched');
+
+  // Shown again one run at a time, without unmuting everything.
+  press(folded.querySelector('button'));
+  assert.equal(client.document.querySelector('#log .muted-run'), null);
+  assert.match(lines()[0], /What got you into art\?/);
+
+  // Remembered here, and said again on the next connection, since the server
+  // knows a fresh guest as somebody new.
+  const again = await loadClient({ storage: { 'eulerchat.hushSystem': 'on' } });
+  assert.equal(again.$('hush-system').getAttribute('aria-pressed'), 'true');
+  arrive(again.emit);
+  assert.ok(
+    again.socket.sent.some((f) => f.type === 'notifications' && f.settings.system === false),
+    'told on arrival',
+  );
+
+  // And nothing is asked for on their behalf while they are muted: an empty
+  // chat is not poked for a question to start it with.
+  clickRoom(again, 'art');
+  assert.deepEqual(again.socket.sent.filter((f) => f.type === 'poke'), [], 'nothing poked');
 });

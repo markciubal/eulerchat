@@ -142,6 +142,7 @@
     "start:sample": "node server/index.js --sample",
     "start:large": "node server/index.js --interests 1000 --people 4000",
     "start:questions": "node server/index.js --sample --questions 30",
+    "demo": "node server/demo.js",
     "test": "node --test",
     "render": "node tools/render.js"
   },

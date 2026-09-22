@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>eulerchat streams</title>
+    <!-- The look this browser chose for the chat, worn here too, and for the
+         same reason as there: before the stylesheet, so there is no flash of
+         the default first. See the same lines in index.html. -->
+    <script>
+      try {
+        var worn = JSON.parse(localStorage.getItem('eulerchat.appearance')).worn;
+        for (var name in worn) {
+          if (typeof worn[name] === 'string' && (/^--[a-z-]+$/.test(name) || name === 'color-scheme')) {
+            document.documentElement.style.setProperty(name, worn[name]);
+          }
+        }
+      } catch (e) {
+        /* nothing chosen, or unreadable: the stylesheet's theme */
+      }
+    </script>
+    <link rel="stylesheet" href="public/streams.css" />
+  </head>
+  <body>
+    <!-- Everything on this page is what anybody at all can read from the
+         open API, fetched the way anybody would fetch it: this page has no
+         access the rest of the world lacks. -->
+    <header class="top">
+      <a class="back" href="./">eulerchat</a>
+      <h1>Streams</h1>
+      <span id="demo" class="pill demo" hidden>Demo · every word here is made up</span>
+      <p class="lede">Everything said here in the clear is public. Anybody can read it, live or
+        in dumps of up to a megabyte, without saying who they are.</p>
+    </header>
+
+    <nav class="tabs" role="tablist" aria-label="Streams">
+      <button id="tab-live" type="button" role="tab" aria-selected="true" aria-controls="live">Live <span id="live-rate" class="count"></span></button>
+      <button id="tab-dumps" type="button" role="tab" aria-selected="false" aria-controls="dumps" tabindex="-1">Dumps <span id="dump-count" class="count"></span></button>
+      <button id="tab-deletions" type="button" role="tab" aria-selected="false" aria-controls="deletions" tabindex="-1">Deletions <span id="deletion-count" class="count"></span></button>
+    </nav>
+
+    <main>
+      <p id="off" class="notice" hidden>This server does not publish its streams.</p>
+
+      <!-- The firehose, as it happens. -->
+      <section id="live" role="tabpanel" aria-labelledby="tab-live">
+        <div class="tools">
+          <span id="status" class="status" role="status">Connecting…</span>
+          <fieldset class="kinds">
+            <legend class="offscreen">Show</legend>
+            <label><input type="checkbox" value="message" checked /> Messages</label>
+            <label><input type="checkbox" value="room-opened" /> Rooms opened</label>
+            <label><input type="checkbox" value="room-closed" /> Rooms closed</label>
+            <label><input type="checkbox" value="forgotten" checked /> Forgotten</label>
+            <label><input type="checkbox" value="dump" checked /> Dumps</label>
+          </fieldset>
+          <input id="room-filter" type="search" placeholder="Filter by interest" aria-label="Filter by interest" />
+          <button id="pause" type="button" aria-pressed="false">Pause</button>
+        </div>
+        <p id="paused" class="notice" hidden></p>
+        <ol id="events" class="events" aria-label="Events, newest first"></ol>
+        <p id="live-empty" class="empty">Nothing yet. Events appear here as they happen.</p>
+      </section>
+
+      <!-- What the firehose left behind, a megabyte at a time. -->
+      <section id="dumps" role="tabpanel" aria-labelledby="tab-dumps" hidden>
+        <div class="filling">
+          <div class="filling-says">
+            <strong>Next dump</strong>
+            <span id="pending-says"></span>
+          </div>
+          <div class="meter" aria-hidden="true"><div id="pending-bar" class="meter-fill"></div></div>
+          <p class="note">When the next event would take it past a megabyte, what has gathered
+            becomes a dump and the gathering starts again from nothing. A dump loses a message
+            when the place forgets it, and goes twelve hours after the last thing in it.</p>
+        </div>
+        <ol id="dump-list" class="dump-list" aria-label="Dumps, newest first"></ol>
+        <p id="dumps-empty" class="empty">No dumps yet.</p>
+        <section id="dump-view" class="dump-view" hidden aria-labelledby="dump-view-title">
+          <div class="dump-view-head">
+            <h2 id="dump-view-title"></h2>
+            <button id="dump-view-close" type="button">Close</button>
+          </div>
+          <p id="dump-view-says" class="note"></p>
+          <ol id="dump-events" class="events" aria-label="Events in this dump"></ol>
+        </section>
+      </section>
+
+      <!-- The deletion record: what the place forgot, and when. -->
+      <section id="deletions" role="tabpanel" aria-labelledby="tab-deletions" hidden>
+        <p class="note">Each entry is bound to the one before it, so the record cannot be
+          edited after the fact without breaking. It names messages by commitment, not by
+          what they said.</p>
+        <ol id="receipt-list" class="receipt-list" aria-label="Deletions, newest first"></ol>
+        <p id="deletions-empty" class="empty">Nothing forgotten yet.</p>
+      </section>
+    </main>
+
+    <script type="module" src="public/streams.js"></script>
+  </body>
+</html>
