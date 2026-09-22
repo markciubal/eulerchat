@@ -1,5 +1,6 @@
 import {
   MAX_ARITY,
+  ROOM_ARITY,
   buildIndex,
   canonical,
   census,
@@ -225,6 +226,17 @@ function groupIn(held) {
  * rooms outside it, and nobody is shown another group's rooms at all.
  */
 const scopedTo = (group) => (subject) => clusterOf(subject) === group;
+
+/**
+ * What a member of a group sees first of what they hold, when it is more than
+ * the view has room for: the group's own conversation, which is the line round
+ * everything else in it; then the rest of the group; then the world outside.
+ * Nobody outside a group is ranked by anything but size.
+ */
+const groupFirst = (group) => (subject) => {
+  if (!group || clusterOf(subject) !== group) return group ? 2 : 0;
+  return isGroupRoom(subject) ? 0 : 1;
+};
 
 /** Region populations, canonically ordered — identical censuses, identical string. */
 const censusSignature = (counts) =>
@@ -633,6 +645,7 @@ export class World {
     const held = this.subscription(userId);
     const { subjects, hidden, suggested } = neighbourhood(counts, held, MAX_ARITY, this.index(), {
       allowed: scopedTo(groupIn(held)),
+      first: groupFirst(groupIn(held)),
     });
     return { held, subjects, hidden, suggested, local: restrict(counts, subjects) };
   }
@@ -1037,6 +1050,7 @@ export class World {
     const held = this.subscription(userId);
     const { subjects } = neighbourhood(counts, held, limit, this.index(), {
       allowed: scopedTo(groupIn(held)),
+      first: groupFirst(groupIn(held)),
     });
     // Anchored to the knowledge hierarchy, so the map keeps its shape as people
     // come and go instead of rearranging itself around whoever is here now.
@@ -1080,7 +1094,7 @@ export class World {
       // the people holding exactly it, while the room it opens reaches
       // everyone holding at least it.
       here,
-      population: counts.get(key) ?? here,
+      population: this.populationOf(key),
       member: receives(held, subjects),
       messages: (this.messages.get(key) ?? []).length,
       stats: this.stats(key),
@@ -1301,7 +1315,7 @@ export class World {
       // Whether there is anything there yet. A code can outlive the room it
       // was made for, or be made for one nobody has opened.
       here: subjects.every((s) => this.subjects.has(s)),
-      population: this.census().get(room) ?? 0,
+      population: this.populationOf(room),
       stats: this.stats(room),
       messages: [...(this.messages.get(room) ?? [])],
     };
@@ -1895,7 +1909,7 @@ export class World {
         reports: this.reports.get(roomKey) ?? [],
         messages: (this.messages.get(roomKey) ?? []).length,
         flags: this.flagged.get(roomKey) ?? 0,
-        population: this.census().get(roomKey) ?? 0,
+        population: this.populationOf(roomKey),
       });
     }
 
@@ -1952,7 +1966,7 @@ export class World {
     const text = scrubbed.text;
 
     if (!room.length) throw new Error('a message needs at least one subject');
-    if (room.length > MAX_ARITY) throw new Error(`at most ${MAX_ARITY} subjects per room`);
+    if (room.length > ROOM_ARITY) throw new Error(`at most ${ROOM_ARITY} subjects per room`);
     if (!text && !options.envelope) throw new Error('empty message');
     for (const s of room) if (!this.subjects.has(s)) throw new Error(`no such subject: ${s}`);
 
@@ -2045,7 +2059,7 @@ export class World {
 
     // How many this reaches is what decides whether it is worth interrupting
     // anyone for, and it is already known here.
-    message.reach = this.census().get(roomKey) ?? 1;
+    message.reach = this.populationOf(roomKey) || 1;
     this.#announce({ type: 'message', room: roomKey, message });
     return message;
   }
@@ -2062,6 +2076,21 @@ export class World {
    * `among` narrows the search, since a caller with connections open knows the
    * few thousand members can be skipped in favour of the few dozen present.
    */
+  /**
+   * How many hold every subject of a room: the people a message there reaches.
+   *
+   * Read from the census for rooms of up to `MAX_ARITY`, which it counts as
+   * it goes. A bigger room is counted when it is asked for, from the holders
+   * of the rarest of its subjects: see `audienceFor`, and `ROOM_ARITY` for why
+   * the census does not keep those.
+   */
+  populationOf(roomKey) {
+    const subjects = parse(String(roomKey ?? ''));
+    if (!subjects.length) return 0;
+    if (subjects.length <= MAX_ARITY) return this.census().get(key(subjects)) ?? 0;
+    return this.audienceFor(subjects).length;
+  }
+
   audienceFor(tags, among = null) {
     const room = canonical(tags);
     if (!room.length) return [];

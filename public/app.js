@@ -1248,8 +1248,17 @@ function renderRooms() {
     // the average of their colours cannot.
     const dot = document.createElement('span');
     dot.className = 'chip-glyphs';
-    for (const subject of inner(room.subjects).slice(0, 3)) {
+    // Three squares at most, since a room can combine ten and the list is
+    // narrow; past three, how many more, so none of them goes unsaid.
+    const own = inner(room.subjects);
+    for (const subject of own.slice(0, 3)) {
       dot.append(glyphSwatch(document, subject, 14));
+    }
+    if (own.length > 3) {
+      const more = document.createElement('span');
+      more.className = 'chip-more';
+      more.textContent = `+${own.length - 3}`;
+      dot.append(more);
     }
 
     // Named as the room is read, so the group's art is `art` and not
@@ -3880,7 +3889,7 @@ let catalogueDrawn = '';
 function paintCatalogue() {
   const select = $('add-interest');
   if (!select || !state.chart) return;
-  const held = heldInterests();
+  const held = heldHere();
   const drawn = `${state.chart.at}|${[...held].sort().join('|')}`;
   if (drawn === catalogueDrawn) return;
   catalogueDrawn = drawn;
@@ -3895,7 +3904,7 @@ $('add-interest').addEventListener('change', (evt) => {
   // Back to the prompt straight away, so the list says what it is for
   // rather than the name of the last thing picked from it.
   showPrompt(evt.target);
-  if (!id || heldInterests().has(id)) return;
+  if (!id || heldHere().has(id)) return;
   joinSubject(id);
   // Said in the dialog, not on the page's notice line, which is behind the
   // dialog and inert while it is open.
@@ -3974,6 +3983,20 @@ interests.addEventListener('close', () => card.hide(true));
  */
 function heldInterests() {
   const held = (state.diagram?.subscription ?? []).filter((s) => !isGroupRoom(s));
+  return new Set(held.map(subjectLabel));
+}
+
+/**
+ * What is held where they are now, by the names the catalogue gives them:
+ * inside a group, the group's copies; outside one, the open world's. What can
+ * be added from the list is whatever is not held here. Counted on both sides
+ * of the line, somebody holding painting outside who went into a group found
+ * the group's painting marked as joined, could not pick it, and was left with
+ * a map that showed only the painting outside.
+ */
+function heldHere() {
+  const here = state.cluster ?? null;
+  const held = (state.diagram?.subscription ?? []).filter((s) => !isGroupRoom(s) && clusterOf(s) === here);
   return new Set(held.map(subjectLabel));
 }
 

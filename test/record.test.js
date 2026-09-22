@@ -2018,6 +2018,56 @@ test('All interests stands in relief too, and one setting lays both flat', async
 
 // --- adding from the list ------------------------------------------------------------
 
+test('a room of more than three is listed with three squares, how many more, and every name', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  const five = ['art', 'chess', 'music', 'philosophy', 'poetry'];
+  const key = five.join('+');
+  client.emit({
+    type: 'atlas',
+    subjects: five,
+    extent: 1000,
+    zones: [{ key, subjects: five, population: 2, x: 0, y: 0, room: 60, seed: { x: 0, y: 0 } }],
+    curves: five.map((subject) => ({ subject, components: 1, anchor: { x: 0, y: 0, room: 60 }, loops: [[[-60, -60], [60, -60], [60, 60], [-60, 60]]] })),
+    network: [],
+    report: { exact: true, phantoms: 0, vanished: 0, worstError: 0, disconnected: [], worstSplit: 1, wellFormed: true },
+    subscription: five,
+    rooms: [{ key, subjects: five, population: 2, here: 2, member: true, messages: 0, stats: { messages: 0, perMinute: 0, last: null } }],
+  });
+  const chip = [...client.document.querySelectorAll('.room-chip')].find((c) => (c.getAttribute('aria-label') ?? '').includes('poetry'));
+  assert.ok(chip, 'the room is listed');
+  assert.equal(chip.querySelectorAll('.chip-glyphs .glyph').length, 3, 'three squares, as the list has room for');
+  assert.equal(chip.querySelector('.chip-more')?.textContent, '+2', 'and how many more');
+  for (const name of five) assert.match(chip.textContent, new RegExp(name), `${name} is named`);
+});
+
+test("inside a group, the list offers the group's copy of what is held outside", async () => {
+  const client = await loadClient({ storage: { 'eulerchat.group': 'kite-fox-9' } });
+  arrive(client.emit);
+  const everyone = 'kite-fox-9/everyone';
+  const state = (subscription) =>
+    client.emit({ type: 'state', subscription, funnel: 0, rail: { held: subscription, suggested: [], popular: [], total: subscription.length } });
+  // Art held outside, and in the group, nothing yet.
+  state(['art', everyone]);
+  client.document.querySelector('.interests-open').dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  client.emit({ type: 'chart', ...(await stockedChart()) });
+  const list = client.$('add-interest');
+  const option = (value) => [...list.querySelectorAll('option')].find((o) => o.value === value);
+  assert.equal(option('art').hasAttribute('disabled'), false, "the group's art is not held, so it can be added");
+
+  option('').selected = false;
+  option('art').selected = true;
+  list.dispatchEvent(new client.document.defaultView.Event('change', { bubbles: true }));
+  assert.ok(
+    client.socket.sent.some((f) => f.type === 'createSubject' && f.name === 'kite-fox-9/art'),
+    "picking it joins the group's art",
+  );
+
+  // Once held there, it is marked there.
+  state(['art', 'kite-fox-9/art', everyone]);
+  assert.equal(option('art').hasAttribute('disabled'), true);
+});
+
 test('Interests lists the whole catalogue by division, and picking from it joins', async () => {
   const client = await loadClient();
   arrive(client.emit);

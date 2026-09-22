@@ -17,7 +17,9 @@ const sequence = (seed = 5) => () => ((seed = (seed * 1103515245 + 12345) % 2147
 
 test('a question names the room it is asked in, and claims nothing', () => {
   const random = sequence();
-  for (const room of [['entomology'], ['board games'], ['art'], ['art', 'philosophy'], ['music', 'poetry', 'philosophy']]) {
+  const many = ['art', 'music', 'poetry', 'philosophy', 'chess'];
+  const most = [...many, 'film', 'jazz', 'opera', 'dance', 'theatre'];
+  for (const room of [['entomology'], ['board games'], ['art'], ['art', 'philosophy'], ['music', 'poetry', 'philosophy'], many, most]) {
     for (let i = 0; i < 40; i++) {
       const question = ask(room, { random });
       for (const subject of room) assert.ok(question.includes(subject), `"${question}" is not about ${subject}`);

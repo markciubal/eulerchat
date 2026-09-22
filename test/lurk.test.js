@@ -22,7 +22,9 @@ test('a quick-join link names one room, the way rooms are named everywhere else'
   assert.equal(watchedFrom(link), 'art+philosophy', 'written the one way a room is written');
   assert.equal(watchedFrom(watchLink('https://example.com', 'kite-fox-9/art+kite-fox-9/everyone')), 'kite-fox-9/art+kite-fox-9/everyone');
 
-  for (const junk of ['', 'a+b+c+d', '<script>', 'ART', 'x'.repeat(40), 'nope/art']) {
+  // A room may combine up to ten interests, so four is one and eleven is not.
+  assert.equal(watchable('a+b+c+d'), 'a+b+c+d');
+  for (const junk of ['', 'a+b+c+d+e+f+g+h+i+j+k', '<script>', 'ART', 'x'.repeat(40), 'nope/art']) {
     assert.equal(watchable(junk), null, `"${junk}" is not a room`);
   }
   assert.equal(watchedFrom('https://example.com/?cluster=kite-fox-9'), null);

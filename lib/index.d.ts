@@ -12,7 +12,10 @@ export type RegionKey = string;
 export type Census = Map<RegionKey, number>;
 
 /** No arrangement of circles realises every region of a 4-set Venn diagram. */
+/** How many subjects the census counts together. */
 export const MAX_ARITY: 3;
+/** How many subjects one room may combine; see `lib/regions.js`. */
+export const ROOM_ARITY: 10;
 
 // --- region algebra --------------------------------------------------------
 

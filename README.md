@@ -577,9 +577,15 @@ inviteLink('https://example.com/', group);
 the server sees to that, and leaving it is leaving the group. Every room in the
 group is therefore inside it, so on the map its ground is exactly the area of
 the group's rooms, drawn as a dashed line round them with the group's name on
-the top edge. The cost is arity: a room can combine three subjects, and inside a
-group one of the three is always the group, so a group's rooms combine two
-interests at most.
+the top edge. A room can combine up to ten subjects, and inside a group one of
+them is always the group, so a group's rooms combine nine interests at most.
+
+**The group comes first on the map.** A view shows as many of what somebody
+holds as it has room for, the busiest first — which on its own left a group
+off it every time, since a group's rooms hold the handful of people in it and
+the interests outside hold everybody. So for a member the group's own
+conversation comes first, then the rest of the group, and only then the world
+outside by size.
 
 **Inside, a copy of the world outside.** Only the membership is
 different. Whatever is worked out from a name is worked out from the name without
@@ -828,8 +834,13 @@ fact, not a rendering budget — ellipses reach five, and arbitrary closed curve
 manage any number at the cost of looking like nothing at all. Rather than
 degrade past that point, each person gets their own local view: the subjects
 they hold, plus the neighbouring subjects that share the most members with
-them, capped at three. Region arity is capped to match, so every room that
-exists is a room that can be drawn.
+them, capped at three. That is the circles' view (`diagramFor`), and the
+census counts combinations of up to three to match (`MAX_ARITY`), which is
+also what keeps it from growing out of hand: it is cubic in what one person
+holds. The map people use is the atlas, which is not circles and draws a
+region of any size, so a room may combine up to ten subjects (`ROOM_ARITY`).
+The population of a room bigger than three is counted when it is asked for,
+from the holders of the rarest of its subjects, rather than kept.
 
 ### Circles are the reason for the residual error
 

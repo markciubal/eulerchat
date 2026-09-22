@@ -3348,6 +3348,14 @@ li:hover .msg-action,
   flex: none;
 }
 
+/* How many more subjects than the squares show: "+2" beside the third. */
+.chip-more {
+  margin-left: 2px;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* The swatch is a button wrapped round a drawing now, so it has no size of
    its own to set. */
 .swatch {

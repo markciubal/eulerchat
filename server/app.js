@@ -24,7 +24,7 @@ import { World, seed, stock } from './store.js';
 import { populate } from './populate.js';
 import { Sessions } from './sessions.js';
 import { Notifications } from './notifications.js';
-import { parse } from '../lib/regions.js';
+import { ROOM_ARITY, parse } from '../lib/regions.js';
 import { fingerprint } from '../lib/seal.js';
 import { challenge } from '../lib/proof.js';
 import { createPublicApi } from './public-api.js';
@@ -535,7 +535,7 @@ export function createEulerChat(options = {}) {
 
     /** Everything a connection needs on finding out who it is. */
     const greet = () => {
-      send(socket, { type: 'welcome', you: you(), maxArity: 3 });
+      send(socket, { type: 'welcome', you: you(), maxArity: ROOM_ARITY });
       send(socket, { type: 'history', rooms: world.historyFor(userId) });
     };
 
@@ -619,7 +619,7 @@ export function createEulerChat(options = {}) {
       }
       if (!vouched) bind(held, userId);
       send(socket, { type: 'proven', keyId: session.keyId });
-      send(socket, { type: 'welcome', you: you(), maxArity: 3 });
+      send(socket, { type: 'welcome', you: you(), maxArity: ROOM_ARITY });
     };
 
     greet();
@@ -675,7 +675,7 @@ export function createEulerChat(options = {}) {
 
           case 'identify': {
             world.rename(userId, msg.name);
-            send(socket, { type: 'welcome', you: you(), maxArity: 3 });
+            send(socket, { type: 'welcome', you: you(), maxArity: ROOM_ARITY });
             break;
           }
 
@@ -933,7 +933,9 @@ export function createEulerChat(options = {}) {
           }
 
           case 'atlas': {
-            const want = Math.min(14, Math.max(2, Number(msg.subjects) || 5));
+            // No more subjects than a room may combine, so every room the map
+            // can draw is a room that can be spoken in.
+            const want = Math.min(ROOM_ARITY, Math.max(2, Number(msg.subjects) || 5));
             const view = world.atlasFor(userId, want);
             // How many are lurking in each room; see `lurkers`.
             for (const room of view.rooms) room.lurkers = lurkers.get(room.key) ?? 0;
