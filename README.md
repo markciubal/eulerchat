@@ -1591,6 +1591,46 @@ is where people talk (the code and the API still say room), and an
 - **Interests:** search first, then the whole list to pick from, then what is
   suggested. **Joining options** is folded away at the foot.
 
+### A tour, pointed rather than played
+
+**Tour**, in the header, is five steps: the map, Interests, Chats, All
+interests, and where the rest lives. It is lit until it has been taken or
+waved away — once, in this browser — and quiet after that.
+
+It points rather than blocks (`public/tour.js`). A ring goes round whatever
+the step is about, and a card stands beside it. Nothing is covered and nothing
+is made inert: every press goes through to the page underneath, so the tour can
+be read while the thing it describes is being used. Each step looks for its own
+target when it is shown rather than holding an element from before, since the
+header's buttons live in the bar along the bottom on a phone and a popped-out
+map is somewhere else again; a step whose target is not on this screen still
+says its piece, in the middle, without a ring.
+
+**The arrow is the button's own icon.** Off duty it turns to face the pointer,
+wherever the pointer is, so the way in is a little arrow watching the hand that
+might press it. Once the tour is running it faces whatever the step is about
+instead, and stops chasing the hand — a compass that cannot make its mind up
+points at nothing. It is two elements, one inside the other: the outer one is
+turned, the inner one wiggles about its own middle, because one element doing
+both would have the animation fight the aim every frame. It swings a quarter of
+the way round per frame and always the short way, so it never spins the long
+way to reach next door. Escape stops the tour, the arrow keys walk it, and
+`prefers-reduced-motion` stops the wiggle, the knocking on the button, and the
+swing — the arrow simply is where it is pointing.
+
+**It borrows a crowd, and gives it back.** A tour of a world with nobody in it
+is a tour of an empty room, so where the server will make people up
+(**Populate with machines**, above) and none have been made, the tour asks for
+them as it starts and takes them away again at the end. People who were already
+there were not made by the tour, so the tour does not remove them.
+
+**With nothing drawn yet, it starts on the sheet.** If the map has no chats on
+it — nobody has joined anything, so there are no overlaps to look at — the tour
+opens **All interests**, which is full whatever else is true, and begins there;
+the other steps close it again. The card stands *inside* that sheet while it is
+open, because everything outside an open modal dialog is inert and a tour that
+could be seen and not pressed would be a picture of a tour.
+
 ### Small things that help
 
 - **Every chat of yours is in the list.** The map draws a handful of
@@ -1811,6 +1851,44 @@ layout — realising an arbitrary region structure with every subject connected
 is not always possible at all — and it does not respond to more space or a
 finer grid, so it is reported (`report.disconnected`, `report.worstSplit`)
 rather than papered over. The default is five.
+
+## Populate with machines
+
+A fresh server is the catalogue and nobody in it, which is the honest start for
+a deployment and a poor one for looking at the thing you are building. So
+**Settings → Made-up people** is one control, read as one sentence:
+
+```
+[robot] Populate with  200  machines
+```
+
+The number is edited where it stands. Pressing it asks the server for that
+many people, with interests drawn the way `populate` draws them — clustered by
+field, Zipf-ish within a field, a few imports from elsewhere — so the map has
+overlaps worth looking at rather than a thousand disjoint circles. Pressing it
+again takes away exactly the ones it made and leaves anybody real alone. Typing
+a different number while they are there asks for that many instead.
+
+```js
+{ type: 'machines', count: 200 }   // → { type: 'machines', count, most }, to everybody
+```
+
+- **They say nothing.** Nothing here posts on their behalf: they are a
+  population, not a conversation. Made-up people who talk are the demo's
+  business (`npm run demo`), and every word they say there is labelled a system
+  message.
+- **They are made up, and the interface says so.** The section is called
+  *Made-up people* and says what pressing it does.
+- **Capped at `MACHINES_MOST`**, twenty thousand. The census counts every
+  subset of what each person holds, so this is a number about the server's
+  machine rather than about the screen; twenty thousand takes a couple of
+  seconds.
+- **Off unless the server offers it.** `createEulerChat({ machines: true })`,
+  which the library does not do for you. The bundled server turns it on only
+  when `productionSigns` finds nothing — the same guard that stops the demo
+  starting — and a server that has not offered it refuses the frame and never
+  shows the button. Made-up people in a real place would be passed off as real
+  ones.
 
 ## The demo
 

@@ -154,6 +154,12 @@
         <path d="M12 3v3.5M12 17.5V21M3 12h3.5M17.5 12H21M5.6 5.6l2.5 2.5M15.9 15.9l2.5 2.5M5.6 18.4l2.5-2.5M15.9 8.1l2.5-2.5" />
         <circle cx="12" cy="12" r="2" />
       </symbol>
+      <!-- The nib of a pointer. Drawn facing up and to the right, which is
+           where a cursor's arrow points, and turned from there to face
+           wherever the pointer is; see `public/tour.js`. -->
+      <symbol id="icon-tour" viewBox="0 0 24 24">
+        <path d="M4 3l16 7.6-7.3 1.8-2 7.2z" fill="currentColor" stroke-linejoin="round" />
+      </symbol>
       <symbol id="icon-robot" viewBox="0 0 24 24">
         <rect x="4" y="8" width="16" height="11" rx="3" />
         <path d="M12 4.5V8" />
@@ -313,6 +319,11 @@
            while talking. The panel follows the button, so the keyboard goes
            from one into the other. -->
       <div class="settings-wrap">
+        <!-- A short tour of the place, for somebody who has just arrived. Lit
+             until it has been taken or waved away; see `paintTour`. -->
+        <button id="tour-open" type="button" class="bar-button tour-open">
+          <svg id="tour-nib" class="icon tour-nib" aria-hidden="true" focusable="false"><g class="tour-wiggle"><use href="#icon-tour" /></g></svg><span class="bar-button-word">Tour</span>
+        </button>
         <button id="settings-open" type="button" class="bar-button pop-toggle" aria-label="Settings"
                 aria-expanded="false" aria-controls="settings-pop"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-settings" /></svg><span class="bar-button-word">Settings</span></button>
         <div id="settings-pop" class="popout settings-pop" hidden>
@@ -712,6 +723,23 @@
       <svg id="diagram" role="img" aria-describedby="fit"
            aria-label="A map of the interests in view. Where interests overlap there is a chat. Every chat on this map is also listed under the Chats button."></svg>
     </section>
+
+    <!-- A short tour: a ring round the thing being talked about, a card
+         saying what it is, and a small arrow that follows the pointer and
+         points at it. See `public/tour.js`. -->
+    <div id="tour" class="tour" hidden>
+      <div id="tour-ring" class="tour-ring" aria-hidden="true"></div>
+      <div id="tour-card" class="tour-card" role="dialog" aria-labelledby="tour-title" aria-describedby="tour-say" tabindex="-1">
+        <p id="tour-step" class="tour-step"></p>
+        <h2 id="tour-title" class="tour-title"></h2>
+        <p id="tour-say" class="tour-say"></p>
+        <div class="tour-actions">
+          <button id="tour-back" type="button">Back</button>
+          <button id="tour-next" type="button" class="join-here">Next</button>
+          <button id="tour-stop" type="button" class="tour-stop">Stop</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Where the map will land. Shown while the window is being dragged near
          enough to a side that letting go would dock it there. -->

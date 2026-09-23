@@ -10,6 +10,7 @@ import { mountExplorer } from './explorer.js';
 import { fillCatalogue, showPrompt } from './catalogue.js';
 import { mountPeek } from './peek.js';
 import { contextMenu } from './menu.js';
+import { mountTour } from './tour.js';
 import { attachHelp, busyness, createCard, when } from './hints.js';
 import { available, forgetIdentity, rememberedIdentity, seal, unseal } from '../lib/seal.js';
 import { mark, prove } from '../lib/proof.js';
@@ -122,6 +123,11 @@ const state = {
   joining: null,
   /** Whether what the server writes is folded away; see `hushSystem`. */
   hushSystem: false,
+  /**
+   * Whether this server will make up people on request, the most it will make,
+   * and how many it has made; null where it will not. See `paintMachines`.
+   */
+  machines: null,
   /**
    * The map branched out into a community, drawn in place of their own until
    * they go back: `{from, toward, view}`, `view` null until it arrives. See
@@ -332,6 +338,9 @@ function handleFrame(evt) {
       else delete document.body.dataset.demo;
       // The way to the firehose, where there is one to see.
       $('open-data').hidden = msg.streams !== true;
+      // Made-up people, where the server will make them; see `paintMachines`.
+      state.machines = msg.machines ?? null;
+      paintMachines();
       // A lurker leaves nothing on this device, not even which connection it was.
       if (!state.lurking) remember(msg.you.id);
       // Never clobber what someone is in the middle of typing.
@@ -579,6 +588,20 @@ function handleFrame(evt) {
       drawAtlas({ repaint: true, fit: first });
       break;
     }
+
+    case 'machines':
+      // Somebody asked for made-up people — here or in another window — and
+      // this is how many there are now. A few hundred people arriving at once
+      // changes every map there is, and whoever pressed the button is waiting
+      // to see it, so it is asked for now rather than at the next ten seconds.
+      state.machines = { most: msg.most ?? state.machines?.most ?? 0, count: msg.count ?? 0 };
+      paintMachines();
+      // Drawn as soon as it arrives, not at the next ten seconds: this is a
+      // change somebody asked for and is watching for, so it is theirs in the
+      // sense that matters here. See `REDRAW_EVERY`.
+      state.drewAt = 0;
+      askForMap({ now: true });
+      break;
 
     case 'lurkers': {
       // How many are lurking in a room, as it changes. Written onto
@@ -2464,6 +2487,205 @@ $('branch-join-all').addEventListener('click', () => {
 $('branch-join-some').addEventListener('click', () => {
   const community = branchedCommunity();
   if (community) openJoinSome(community.members ?? [], inWords(community.name));
+});
+
+// --- the tour ---------------------------------------------------------------------
+
+/**
+ * A short tour of the place: the map, the two ways to find something to talk
+ * about, and where the rest lives.
+ *
+ * Every step points at something really on the screen, so each one looks for
+ * its own target when it is shown rather than holding an element from before —
+ * the header's buttons are in the bar along the bottom on a phone, and a map
+ * popped out is somewhere else again.
+ */
+const TOUR_KEY = 'eulerchat.tour';
+/** Whether the arrow still watches the pointer; see `watch` in `public/tour.js`. */
+const WATCH_KEY = 'eulerchat.tour.watch';
+
+/** What this browser remembers about being watched. On, until it is turned off. */
+function watching() {
+  try {
+    return localStorage.getItem(WATCH_KEY) !== 'off';
+  } catch {
+    return true;
+  }
+}
+
+/** The first of these that is actually on the screen. */
+const shown = (...selectors) => {
+  for (const selector of selectors) {
+    for (const node of document.querySelectorAll(selector)) {
+      const box = node.getBoundingClientRect?.();
+      if (box && (box.width || box.height)) return node;
+    }
+  }
+  return null;
+};
+
+/**
+ * The steps, worked out as the tour starts rather than once at the top.
+ *
+ * A tour of an empty map is a tour of an empty room, so where nothing has been
+ * drawn yet — nobody has joined anything, and there are no overlaps to look at
+ * — it opens with All interests, which is the one place that is full whatever
+ * else is true. Each step closes the sheet again unless it is the sheet's own.
+ */
+function tourSteps() {
+  const sheet = {
+    at: () => shown('#explorer-chart', '.explore-open'),
+    title: 'All the interests there are',
+    say: 'One sheet with everything on it. Colour it by community to see what the same people hold together, and branch out into one to see where it would take you.',
+    before: () => explorer.open(),
+  };
+  const rest = [
+    {
+      at: () => shown('#diagram'),
+      title: 'The map is the place',
+      say: 'Every interest is a shape, sized by how many hold it. Where shapes overlap there is a chat for the people in both. Press a patch to open it.',
+    },
+    {
+      at: () => shown('#interests-open', '.interests-open'),
+      title: 'Pick what you are interested in',
+      say: 'Your interests decide which chats exist for you. Add a few and the map fills in around them.',
+    },
+    {
+      at: () => shown('#rooms-open'),
+      title: 'Every chat, as a list',
+      say: 'The same chats the map draws, in words: the lively ones first, then yours. Pin the ones you keep coming back to.',
+    },
+    sheet,
+    {
+      at: () => shown('#settings-open'),
+      title: 'The rest lives here',
+      say: 'Alerts, muting what the server writes, your key, the record of what was deleted — and the note that everything said here in the clear is public.',
+    },
+  ].map((step) => (step === sheet ? step : { ...step, before: () => explorer.close() }));
+  // Nothing drawn: the sheet goes first, open, and is not shown twice.
+  return currentRooms().length ? rest : [sheet, ...rest.filter((step) => step !== sheet)];
+}
+
+/** Whether the tour made the people it is being given in front of. */
+let tourMadeThem = false;
+
+const tour = mountTour(document, {
+  steps: tourSteps,
+  watching: watching(),
+  opening: () => {
+    // Somewhere to look. Where the server will make people up and has made
+    // none, the tour fills the place for as long as it lasts and empties it
+    // again at the end — a tour of a world with nobody in it is a tour of an
+    // empty room. Anybody already there was not made by this and is left.
+    if (state.machines && state.machines.count === 0) {
+      tourMadeThem = true;
+      send({ type: 'machines', count: machinesWanted() });
+    }
+  },
+  done: () => {
+    if (tourMadeThem) {
+      tourMadeThem = false;
+      send({ type: 'machines', count: 0 });
+    }
+    explorer.close();
+    try {
+      localStorage.setItem(TOUR_KEY, 'taken');
+    } catch {
+      /* it was still a tour */
+    }
+    paintTour();
+    $('tour-open').focus?.({ preventScroll: true });
+  },
+});
+
+/** Lit until it has been taken or waved away, and quiet ever after. */
+function paintTour() {
+  let taken = false;
+  try {
+    taken = localStorage.getItem(TOUR_KEY) === 'taken';
+  } catch {
+    /* nothing remembered here */
+  }
+  $('tour-open').classList.toggle('new', !taken);
+  $('tour-open').setAttribute('aria-label', taken ? 'Take the tour again' : 'Take a short tour');
+}
+
+$('tour-open').addEventListener('click', () => {
+  closePopouts();
+  // Pressing it answers the arrow as well as opening the tour: somebody who
+  // has been asked does not need to be followed about afterwards, and
+  // pressing it again says they would like it back. Remembered here, since it
+  // is about this browser rather than about the place.
+  const next = !tour?.watching;
+  tour?.watch(next);
+  try {
+    localStorage.setItem(WATCH_KEY, next ? 'on' : 'off');
+  } catch {
+    /* it holds for as long as the page is open */
+  }
+  if (tour?.isOn) tour.stop();
+  else tour?.start();
+});
+
+paintTour();
+
+// --- made-up people ---------------------------------------------------------------
+
+/**
+ * A random population, for a world with nobody in it yet.
+ *
+ * One control, read as one sentence: *Populate with 200 machines*, with the
+ * number edited where it stands rather than in a dialog somewhere else. The
+ * button says whether they are there; the number says how many, and changing
+ * it while they are there asks for that many instead. Offered only where the
+ * server says it will make people up at all, which is never anywhere that
+ * looks like a deployment.
+ */
+function paintMachines() {
+  const offered = Boolean(state.machines);
+  $('machines').hidden = !offered;
+  if (!offered) return;
+  const on = state.machines.count > 0;
+  const button = $('machines-toggle');
+  button.setAttribute('aria-pressed', String(on));
+  button.querySelector('.label').textContent = on ? 'Populated with' : 'Populate with';
+  button.setAttribute('aria-label', on ? 'Take the made-up people away' : 'Populate with made-up people');
+  const count = $('machines-count');
+  count.max = String(state.machines.most || 20000);
+  // Their number while they are there; what would be asked for while they are
+  // not, which is whatever was last typed.
+  if (on) count.value = String(state.machines.count);
+}
+
+/** How many the number says, inside what the server will allow. */
+function machinesWanted() {
+  const most = state.machines?.most ?? 20000;
+  const asked = Math.floor(Number($('machines-count').value) || 0);
+  return Math.max(1, Math.min(most, asked));
+}
+
+$('machines-toggle').addEventListener('click', () => {
+  if (!state.machines) return;
+  const on = state.machines.count > 0;
+  send({ type: 'machines', count: on ? 0 : machinesWanted() });
+  notify(on ? 'Taking the made-up people away…' : `Making up ${machinesWanted()} people…`);
+});
+
+// Edited while they are there: that many instead, once the number is settled
+// rather than on every keystroke, since each ask rebuilds the world.
+$('machines-count').addEventListener('change', () => {
+  const wanted = machinesWanted();
+  $('machines-count').value = String(wanted);
+  if (state.machines?.count > 0 && wanted !== state.machines.count) {
+    send({ type: 'machines', count: wanted });
+  }
+});
+
+$('machines-count').addEventListener('keydown', (evt) => {
+  if (evt.key === 'Enter') {
+    evt.preventDefault();
+    $('machines-count').dispatchEvent(new Event('change'));
+  }
 });
 
 /** A link on the clipboard, or said where it can be copied from by hand. */

@@ -976,6 +976,200 @@ body[data-dragging] .map-bar {
   display: none;
 }
 
+/* The tour: a ring round what is being talked about, a card beside it, and a
+   small arrow that follows the pointer. Nothing is covered and nothing is made
+   inert — it points at the real thing rather than standing in front of it. */
+.tour {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  /* The layer catches nothing: every press goes to the page underneath, so a
+     tour about a button can be taken while using it. Its own parts take the
+     pointer back. */
+  pointer-events: none;
+}
+
+.tour[hidden] {
+  display: none;
+}
+
+.tour-ring {
+  position: fixed;
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 4px rgb(58 110 165 / 0.18);
+  transition: left 180ms ease, top 180ms ease, width 180ms ease, height 180ms ease;
+}
+
+.tour-ring[hidden] {
+  display: none;
+}
+
+/* The arrow is the Tour button's own icon: the svg is turned to face
+   whatever it is watching, and the group inside it wiggles about its own
+   middle. Two elements, because one doing both would have the wiggle fight
+   the aim every frame. */
+.tour-nib {
+  transform-origin: center;
+  will-change: transform;
+}
+
+.tour-nib .tour-wiggle {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: tour-wiggle 1.4s ease-in-out infinite;
+}
+
+@keyframes tour-wiggle {
+  0%, 100% { transform: rotate(-8deg); }
+  50% { transform: rotate(8deg); }
+}
+
+.tour-card {
+  position: fixed;
+  width: min(20rem, calc(100vw - 20px));
+  padding: 12px 14px 12px;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 32px rgb(0 0 0 / 0.22);
+  pointer-events: auto;
+  transition: left 180ms ease, top 180ms ease;
+}
+
+.tour-card:focus {
+  outline: none;
+}
+
+.tour-step {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tour-title {
+  margin: 2px 0 4px;
+  font-size: 16px;
+}
+
+.tour-say {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.tour-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.tour-actions .tour-stop {
+  margin-left: auto;
+}
+
+/* The way in, lit until it has been taken or waved away. */
+.tour-open.new {
+  border-color: var(--accent);
+  color: var(--accent);
+  animation: tour-knock 2.6s ease-in-out infinite;
+}
+
+@keyframes tour-knock {
+  0%, 82%, 100% { box-shadow: 0 0 0 0 rgb(58 110 165 / 0); }
+  88% { box-shadow: 0 0 0 4px rgb(58 110 165 / 0.25); }
+}
+
+/* Movement is a decision about somebody else's screen, and off is off. */
+@media (prefers-reduced-motion: reduce) {
+  .tour-nib .tour-wiggle,
+  .tour-open.new {
+    animation: none;
+  }
+
+  .tour-ring,
+  .tour-card {
+    transition: none;
+  }
+}
+
+/* "Populate with 200 machines": one control, read as one sentence, with the
+   number edited where it stands. The pill is the shape; the button, the number
+   and the word sit inside it, so it reads as a thing to press with a part that
+   can be typed into rather than as three controls in a row. */
+.machines-control {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  /* The whole width of the column: "Populated with" is wider than "Populate
+     with", and a pill sized to its contents wrapped the last word onto a line
+     of its own the moment it was switched on. */
+  width: 100%;
+  padding: 2px 10px 2px 2px;
+  border: 1px solid var(--edge);
+  border-radius: var(--pill);
+  background: var(--panel);
+}
+
+.machines-control:focus-within {
+  border-color: var(--accent);
+}
+
+.machines-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  border: 0;
+  background: none;
+  padding: 4px 6px;
+  white-space: nowrap;
+  border-radius: var(--pill);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  min-height: 0;
+}
+
+.machines-go:hover {
+  color: var(--accent);
+}
+
+/* Populated: the robot and the word carry the accent, so the state is in the
+   control itself and not only in a screen reader's announcement. */
+.machines-go[aria-pressed='true'] {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* The number: part of the sentence, typed into where it sits. Dashed
+   underneath, which is how a thing that can be edited in place reads. */
+.machines-count {
+  width: 3.6em;
+  padding: 2px 2px;
+  border: 0;
+  border-bottom: 1px dashed var(--edge);
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-height: 0;
+}
+
+.machines-count:focus {
+  outline: none;
+  border-bottom-color: var(--accent);
+  border-bottom-style: solid;
+}
+
+.machines-word {
+  color: var(--muted);
+}
+
 /* The result of checking the deletion record. Muted when it is good news,
    and in the warning colour when it is not, so a problem is not read past. */
 .settings-note {

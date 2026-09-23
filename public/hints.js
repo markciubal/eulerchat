@@ -115,6 +115,18 @@ export const HELP = {
     more:
       'You are not told about every message. Busy chats only show a count.',
   },
+  machines: {
+    title: 'Made-up people',
+    short:
+      'Fills this server with made-up people holding made-up interests, so there '
+      + 'is a map to look at before anybody else arrives.',
+    more:
+      'They are not people and they say nothing: nothing here posts on their '
+      + 'behalf. Edit the number to change how many. Turning it off takes away '
+      + 'exactly the ones it made and leaves everybody else alone. It is offered '
+      + 'only where the server is somebody’s own machine, never on anything '
+      + 'that looks like a deployment.',
+  },
   fit: {
     title: 'Map accuracy',
     short:

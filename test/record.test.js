@@ -3134,3 +3134,173 @@ test('every interest listed in All interests carries the way in, in its own colo
   assert.equal(held.getAttribute('aria-label'), 'piano, already yours');
   assert.equal(held.disabled, true);
 });
+
+test('made-up people are offered where the server will make them, and not otherwise', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  assert.equal(client.$('machines').hidden, true, 'nothing offered by default');
+
+  client.emit({ type: 'welcome', you: { id: 'u1', name: 'guest' }, maxArity: 3, machines: { most: 20000, count: 0 } });
+  assert.equal(client.$('machines').hidden, false);
+  const press = (node) => node.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  const toggle = client.$('machines-toggle');
+  const count = client.$('machines-count');
+  assert.equal(toggle.getAttribute('aria-pressed'), 'false');
+  assert.equal(toggle.querySelector('.label').textContent, 'Populate with');
+  assert.equal(count.value, '200', 'a number to start from, editable where it stands');
+  assert.equal(count.getAttribute('max'), '20000');
+
+  // Pressed: that many, please.
+  press(toggle);
+  assert.deepEqual(client.socket.sent.at(-1), { type: 'machines', count: 200 });
+  client.emit({ type: 'machines', count: 200, most: 20000 });
+  assert.equal(toggle.getAttribute('aria-pressed'), 'true');
+  assert.equal(toggle.querySelector('.label').textContent, 'Populated with');
+  assert.equal(count.value, '200', 'and says how many there are');
+
+  // The number edited while they are there: that many instead.
+  count.value = '50';
+  count.dispatchEvent(new client.document.defaultView.Event('change', { bubbles: true }));
+  assert.deepEqual(client.socket.sent.at(-1), { type: 'machines', count: 50 });
+
+  // Never more than the server will make, whatever is typed.
+  count.value = '999999';
+  count.dispatchEvent(new client.document.defaultView.Event('change', { bubbles: true }));
+  assert.deepEqual(client.socket.sent.at(-1), { type: 'machines', count: 20000 });
+  assert.equal(count.value, '20000', 'and the number says what was asked');
+
+  // Pressed again: away with them.
+  client.emit({ type: 'machines', count: 20000, most: 20000 });
+  press(toggle);
+  assert.deepEqual(client.socket.sent.at(-1), { type: 'machines', count: 0 });
+  client.emit({ type: 'machines', count: 0, most: 20000 });
+  assert.equal(toggle.getAttribute('aria-pressed'), 'false');
+});
+
+test('the tour is lit in the header until it is taken, and walks the place once', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  const press = (node) => node.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  const open = client.$('tour-open');
+  assert.ok(open.classList.contains('new'), 'lit for somebody who has not taken it');
+  assert.equal(open.getAttribute('aria-label'), 'Take a short tour');
+  assert.equal(client.$('tour').hidden, true);
+
+  press(open);
+  assert.equal(client.$('tour').hidden, false);
+  assert.equal(client.$('tour-step').textContent, '1 of 5');
+  assert.equal(client.$('tour-title').textContent, 'The map is the place');
+  assert.equal(client.$('tour-back').disabled, true);
+
+  // Through it: five steps, the last one finishing rather than going on.
+  for (const step of ['2 of 5', '3 of 5', '4 of 5', '5 of 5']) {
+    press(client.$('tour-next'));
+    assert.equal(client.$('tour-step').textContent, step);
+  }
+  assert.equal(client.$('tour-next').textContent, 'Done');
+  press(client.$('tour-next'));
+  assert.equal(client.$('tour').hidden, true, 'and it is over');
+  assert.equal(client.store.get('eulerchat.tour'), 'taken');
+  assert.ok(!open.classList.contains('new'), 'and the header goes quiet');
+  assert.equal(open.getAttribute('aria-label'), 'Take the tour again');
+
+  // Taken before: quiet from the start, and still there to take again.
+  const again = await loadClient({ storage: { 'eulerchat.tour': 'taken' } });
+  arrive(again.emit);
+  assert.ok(!again.$('tour-open').classList.contains('new'));
+  press(again.$('tour-open'));
+  assert.equal(again.$('tour').hidden, false);
+  // Waved away part-way through: remembered all the same.
+  press(again.$('tour-stop'));
+  assert.equal(again.$('tour').hidden, true);
+});
+
+test('the tour fills the place while it lasts, and empties it again at the end', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  const press = (node) => node.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  client.emit({ type: 'welcome', you: { id: 'u1', name: 'guest' }, maxArity: 3, machines: { most: 20000, count: 0 } });
+
+  press(client.$('tour-open'));
+  const asked = client.socket.sent.filter((f) => f.type === 'machines');
+  assert.deepEqual(asked.at(-1), { type: 'machines', count: 200 }, 'somewhere to look');
+  client.emit({ type: 'machines', count: 200, most: 20000 });
+
+  // Through to the end: they go again.
+  for (let i = 0; i < 5; i++) press(client.$('tour-next'));
+  assert.equal(client.$('tour').hidden, true);
+  assert.deepEqual(client.socket.sent.filter((f) => f.type === 'machines').at(-1), { type: 'machines', count: 0 });
+
+  // Somebody else's made-up people are not the tour's to take away.
+  const again = await loadClient({ storage: { 'eulerchat.tour': 'taken' } });
+  arrive(again.emit);
+  again.emit({ type: 'welcome', you: { id: 'u1', name: 'guest' }, maxArity: 3, machines: { most: 20000, count: 500 } });
+  press(again.$('tour-open'));
+  assert.deepEqual(again.socket.sent.filter((f) => f.type === 'machines'), [], 'they were already there');
+  press(again.$('tour-stop'));
+  assert.deepEqual(again.socket.sent.filter((f) => f.type === 'machines'), [], 'and they stay');
+});
+
+test('with nothing drawn yet, the tour opens All interests and starts there', async () => {
+  const client = await loadClient();
+  client.emit({ type: 'welcome', you: { id: 'u1', name: 'guest' }, maxArity: 3 });
+  client.emit({ type: 'history', rooms: {} });
+  client.emit({ type: 'state', subscription: [], funnel: 0, rail: { held: [], suggested: [], popular: [], total: 0 } });
+  const press = (node) => node.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+
+  press(client.$('tour-open'));
+  assert.ok(client.$('explorer').open, 'the one place that is full whatever else is true');
+  assert.equal(client.$('tour-title').textContent, 'All the interests there are');
+  assert.equal(client.$('tour-step').textContent, '1 of 5');
+  // And the tour stands inside the sheet, which is modal: outside it is inert.
+  assert.equal(client.$('tour').parentElement?.id, 'explorer');
+
+  // On to the map, and the sheet gets out of the way.
+  press(client.$('tour-next'));
+  assert.equal(client.$('tour-title').textContent, 'The map is the place');
+  assert.ok(!client.$('explorer').open);
+  assert.equal(client.$('tour').parentElement?.tagName, 'BODY');
+
+  // With chats on the map it starts where a person is looking instead.
+  const drawn = await loadClient();
+  arrive(drawn.emit);
+  press(drawn.$('tour-open'));
+  assert.equal(drawn.$('tour-title').textContent, 'The map is the place');
+  assert.ok(!drawn.$('explorer').open);
+});
+
+test('pressing Tour also answers the arrow: it stops watching, and is asked back the same way', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  const press = (node) => node.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  const up = () => client.$('tour-nib').style.transform;
+
+  // Watching, until somebody presses the button.
+  assert.equal(client.store.has('eulerchat.tour.watch'), false, 'nothing decided yet');
+  press(client.$('tour-open'));
+  assert.equal(client.store.get('eulerchat.tour.watch'), 'off', 'asked once, and that is enough');
+
+  // The tour points at its steps while it runs; stopping leaves it standing up.
+  press(client.$('tour-stop'));
+  assert.equal(up(), 'rotate(45.0deg)', 'straight up');
+
+  // A pointer wandering the page no longer turns it.
+  client.document.dispatchEvent(
+    Object.assign(new client.document.defaultView.Event('pointermove', { bubbles: true }), { clientX: 10, clientY: 500 }),
+  );
+  assert.equal(up(), 'rotate(45.0deg)');
+
+  // Pressing again asks it back.
+  press(client.$('tour-open'));
+  assert.equal(client.store.get('eulerchat.tour.watch'), 'on');
+  press(client.$('tour-stop'));
+
+  // Remembered between visits.
+  const again = await loadClient({ storage: { 'eulerchat.tour.watch': 'off' } });
+  arrive(again.emit);
+  assert.equal(again.$('tour-nib').style.transform, 'rotate(45.0deg)', 'up from the start');
+  again.document.dispatchEvent(
+    Object.assign(new again.document.defaultView.Event('pointermove', { bubbles: true }), { clientX: 900, clientY: 40 }),
+  );
+  assert.equal(again.$('tour-nib').style.transform, 'rotate(45.0deg)', 'and it stays up');
+});

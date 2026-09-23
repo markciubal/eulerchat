@@ -21,6 +21,9 @@ export const FORGOTTEN_PER_EVENT: number;
 /** How many interests one `join` frame may carry, for joining a community at once. */
 export const JOIN_AT_ONCE: number;
 
+/** The most made-up people one `machines` frame may ask for. */
+export const MACHINES_MOST: number;
+
 export interface Session<Socket = unknown> {
   id: string;
   userId: string;
@@ -150,6 +153,13 @@ export function createEulerChat(options?: {
   notifications?: Notifications;
   /** Also serve the bundled browser client. */
   serveClient?: boolean;
+  /**
+   * Let a page fill this world with made-up people and empty it again, through
+   * the `machines` frame. Off unless asked for: made-up people anywhere real
+   * would be passed off as real ones. The bundled server turns it on only when
+   * nothing in the environment looks like a deployment.
+   */
+  machines?: boolean;
   /**
    * Serve every unlocked conversation to anybody who asks. Off unless asked
    * for; the bundled server asks for it.
