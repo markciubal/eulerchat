@@ -5,6 +5,7 @@
  */
 
 import { createEulerChat, World, seed, stock, populate } from './app.js';
+import { productionSigns } from './traffic.js';
 import { FileLedger } from './ledger.js';
 
 const flag = (name, fallback) => {
@@ -97,12 +98,20 @@ const questions = asked < 0 ? false : { every: (Number.isFinite(every) && every 
 // This server is the public one: it is the deployment that decided everything
 // said here is readable by anybody. A library consumer gets the opposite
 // default and has to ask for it.
+// Filling the place with made-up people from a button is for somebody's own
+// machine, and the same signs that stop the demo starting stop this being
+// offered at all; see `productionSigns` and the `machines` frame.
+const signs = productionSigns(process.env);
 const chat = createEulerChat({
   world,
   publicApi: true,
   moderators: moderators.map((m) => m.trim()).filter(Boolean),
   questions,
+  machines: signs.length === 0,
 });
+if (signs.length) {
+  console.log(`eulerchat: made-up people cannot be added from a page here — ${signs.join(', ')}.`);
+}
 if (questions) {
   console.log(`eulerchat: sample people will ask a question, labelled as a system message, about every ${questions.every / 1000}s`);
   // Only ever as one of the sample people, so without any it never asks.

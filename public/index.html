@@ -154,6 +154,14 @@
         <path d="M12 3v3.5M12 17.5V21M3 12h3.5M17.5 12H21M5.6 5.6l2.5 2.5M15.9 15.9l2.5 2.5M5.6 18.4l2.5-2.5M15.9 8.1l2.5-2.5" />
         <circle cx="12" cy="12" r="2" />
       </symbol>
+      <symbol id="icon-robot" viewBox="0 0 24 24">
+        <rect x="4" y="8" width="16" height="11" rx="3" />
+        <path d="M12 4.5V8" />
+        <circle cx="12" cy="3.4" r="1.4" />
+        <circle cx="9" cy="12.5" r="1.1" />
+        <circle cx="15" cy="12.5" r="1.1" />
+        <path d="M9.5 16h5" />
+      </symbol>
       <symbol id="icon-hush" viewBox="0 0 24 24">
         <path d="M17.5 13.5V10a5.5 5.5 0 0 0-8.1-4.85" />
         <path d="M6.5 9.2V10c0 4-1.5 5.5-1.5 5.5h11" />
@@ -335,6 +343,26 @@
                 <svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-hush" /></svg><span class="label">System messages on</span>
               </button>
             </div>
+          </section>
+
+          <!-- A random population, for a world with nobody in it yet: made-up
+               people with made-up interests, so there is a map to look at.
+               The number is edited in place, inside the button's own shape.
+               Hidden unless the server says it will do it at all. -->
+          <section id="machines" class="settings" hidden>
+            <h3 data-help="machines">Made-up people</h3>
+            <div class="settings-row">
+              <span class="machines-control">
+                <button id="machines-toggle" type="button" class="machines-go" aria-pressed="false"
+                        aria-describedby="machines-said">
+                  <svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-robot" /></svg><span class="label">Populate with</span>
+                </button>
+                <input id="machines-count" class="machines-count" type="number" inputmode="numeric"
+                       min="1" max="20000" step="1" value="200" aria-label="How many machines" />
+                <span class="machines-word">machines</span>
+              </span>
+            </div>
+            <p id="machines-said" class="settings-note">They hold interests and say nothing. Turning this off takes them away again.</p>
           </section>
 
           <!-- What becomes of what you send: whether this browser keeps its own

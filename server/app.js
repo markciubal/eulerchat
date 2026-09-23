@@ -48,6 +48,17 @@ export const FORGOTTEN_PER_EVENT = 2000;
 /** How many interests one `join` may take at once; see the handler. */
 export const JOIN_AT_ONCE = 40;
 
+/**
+ * The most made-up people one page may ask for; see the `machines` frame.
+ *
+ * Every one of them holds a handful of interests, and the census counts every
+ * subset of what anybody holds, so this is a number about the machine the
+ * server is on rather than about the screen. Twenty thousand is a couple of
+ * seconds and a few dozen megabytes; the demo runs fifty thousand from the
+ * command line, where whoever typed it knows what they asked for.
+ */
+export const MACHINES_MOST = 20_000;
+
 export { World, seed, stock, populate, Sessions, Notifications };
 
 /**
@@ -62,6 +73,9 @@ export { World, seed, stock, populate, Sessions, Notifications };
  * @param {boolean | {rate?: number, near?: number, churn?: number, reply?: number, warm?: number}} [options.traffic]
  *   made-up people talking and coming and going, for the demo only; see
  *   `server/traffic.js` and `server/demo.js`
+ * @param {boolean} [options.machines=false]  let a page fill the world with made-up
+ *   people and empty it again; off unless asked for, and never where anything
+ *   looks like a deployment. See the `machines` frame and `MACHINES_MOST`.
  * @param {boolean} [options.demo]  tell every page this is the demo, so it says so
  *   now and then, have the sample people ask an on-topic question in a quiet
  *   room, labelled as a system message; off unless asked for. See
@@ -72,7 +86,12 @@ export function createEulerChat(options = {}) {
   // The catalogue alone unless a world is given: a host that forgets to pass
   // one is putting this somewhere real, and made-up people there would be
   // passed off as real ones.
-  const { world = stock(new World()), serveClient = true } = options;
+  const { world = stock(new World()), serveClient = true, machines = false } = options;
+  // Everybody these made, so that turning it off takes away exactly those and
+  // leaves whoever is really here alone.
+  const madeUp = new Set();
+  /** Whether this server will make up people on request, and how many it has. */
+  const madeUpSays = () => (machines ? { most: MACHINES_MOST, count: madeUp.size } : null);
   const server = options.server ?? http.createServer();
   const ours = options.server === undefined;
   // Where this lives on the host's server. '' means the root.
@@ -611,7 +630,7 @@ export function createEulerChat(options = {}) {
 
     /** Everything a connection needs on finding out who it is. */
     const greet = () => {
-      send(socket, { type: 'welcome', you: you(), maxArity: ROOM_ARITY, moderator: allowedToModerate(userId, session), demo, streams: published });
+      send(socket, { type: 'welcome', you: you(), maxArity: ROOM_ARITY, moderator: allowedToModerate(userId, session), demo, streams: published, machines: madeUpSays() });
       send(socket, { type: 'history', rooms: world.historyFor(userId) });
     };
 
@@ -696,7 +715,7 @@ export function createEulerChat(options = {}) {
       if (!vouched) bind(held, userId);
       send(socket, { type: 'proven', keyId: session.keyId });
       // A proven key can make somebody a moderator, so they are told again.
-      send(socket, { type: 'welcome', you: you(), maxArity: ROOM_ARITY, moderator: allowedToModerate(userId, session), demo, streams: published });
+      send(socket, { type: 'welcome', you: you(), maxArity: ROOM_ARITY, moderator: allowedToModerate(userId, session), demo, streams: published, machines: madeUpSays() });
     };
 
     greet();
@@ -719,7 +738,7 @@ export function createEulerChat(options = {}) {
       bucket.tokens -= cost;
       return true;
     };
-    const PRICE = { createSubject: 10, atlas: 8, overview: 6, post: 2, search: 1, browse: 1, join: 1, leave: 1, funnel: 2, keys: 3, proof: 3, readers: 2, record: 1, report: 4, concerns: 3, concern: 2, clear: 2, vote: 1, forget: 2, receipts: 4, restore: 6, watch: 2, unwatch: 1, chart: 6, poke: 3, branch: 8 };
+    const PRICE = { createSubject: 10, atlas: 8, overview: 6, post: 2, search: 1, browse: 1, join: 1, leave: 1, funnel: 2, keys: 3, proof: 3, readers: 2, record: 1, report: 4, concerns: 3, concern: 2, clear: 2, vote: 1, forget: 2, receipts: 4, restore: 6, watch: 2, unwatch: 1, chart: 6, poke: 3, branch: 8, machines: 20 };
 
     const hear = (raw) => {
       let msg;
@@ -752,7 +771,7 @@ export function createEulerChat(options = {}) {
 
           case 'identify': {
             world.rename(userId, msg.name);
-            send(socket, { type: 'welcome', you: you(), maxArity: ROOM_ARITY, demo, streams: published });
+            send(socket, { type: 'welcome', you: you(), maxArity: ROOM_ARITY, demo, streams: published, machines: madeUpSays() });
             break;
           }
 
@@ -1043,6 +1062,40 @@ export function createEulerChat(options = {}) {
               send(socket, { type: 'atlas', only: 'rooms', shape: view.shape, subscription: view.subscription, rooms: view.rooms });
             } else {
               send(socket, { type: 'atlas', ...view });
+            }
+            break;
+          }
+
+          case 'machines': {
+            // A random population, so a world with nobody in it has something
+            // to look at: people with interests, made up on the spot and
+            // taken away again by asking for none. They say nothing — nothing
+            // here posts on their behalf — so nothing they do can be read as
+            // somebody's words.
+            if (!machines) {
+              send(socket, { type: 'error', message: 'this server does not make up people' });
+              break;
+            }
+            const want = Math.max(0, Math.min(MACHINES_MOST, Math.floor(Number(msg.count) || 0)));
+            for (const id of madeUp) world.removeUser(id);
+            madeUp.clear();
+            if (want > 0) {
+              // Against the catalogue that is already here rather than a new
+              // one, and with a different seed each time, so asking twice is
+              // not the same crowd twice.
+              const before = new Set(world.members.keys());
+              populate(world, {
+                subjects: Math.max(1, world.subjects.size),
+                users: want,
+                chatter: 0,
+                seed: Date.now() % 1_000_000,
+              });
+              for (const id of world.members.keys()) if (!before.has(id)) madeUp.add(id);
+            }
+            // Everybody's map changes, and everybody's button says how many.
+            pushDiagrams();
+            for (const listener of sessions) {
+              send(listener.socket, { type: 'machines', count: madeUp.size, most: MACHINES_MOST });
             }
             break;
           }
