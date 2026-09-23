@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { parseHTML } from 'linkedom';
 import { identity, seal, unseal } from '../lib/seal.js';
 import { World, seed } from '../server/store.js';
-import { communityColour } from '../lib/palette.js';
+import { communityColour, stroke } from '../lib/palette.js';
 import { challenge } from '../lib/proof.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -1895,11 +1895,16 @@ test('lines join interests people hold together, and a picked one lists and foll
     assert.ok(sheet.querySelector(`.chart-name[data-id="${id}"]`).classList.contains('linked'), `${id} is named`);
   }
   assert.equal(client.$('explorer-with-wrap').hidden, false);
-  const listed = [...client.$('explorer-with').querySelectorAll('button')];
+  const listed = [...client.$('explorer-with').querySelectorAll('button:not(.join-dot)')];
   assert.deepEqual(listed.map((b) => b.getAttribute('aria-label')), [
     'chess, 9 people hold both',
     'padel, 2 people hold both',
   ], 'strongest first, and says what the line means');
+  // And each is offered beside its name, wearing its own swatch.
+  assert.deepEqual(
+    [...client.$('explorer-with').querySelectorAll('.join-dot')].map((b) => b.getAttribute('aria-label')),
+    ['Join chess', 'Join padel'],
+  );
 
   // Following one goes there: chess picked, its lines drawn, art's put away.
   listed[0].dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
@@ -1908,7 +1913,7 @@ test('lines join interests people hold together, and a picked one lists and foll
   assert.ok(!sheet.querySelector('.chart-name[data-id="chess"]').classList.contains('linked'), 'not linked to itself');
   assert.ok(sheet.querySelector('.chart-name[data-id="art"]').classList.contains('linked'));
   assert.deepEqual(
-    [...client.$('explorer-with').querySelectorAll('button')].map((b) => b.querySelector('span').textContent),
+    [...client.$('explorer-with').querySelectorAll('button:not(.join-dot)')].map((b) => b.querySelector('span').textContent),
     ['art', 'padel'],
   );
 });
@@ -3090,4 +3095,42 @@ test('what the server writes can be muted, and is then folded away and not count
   // chat is not poked for a question to start it with.
   clickRoom(again, 'art');
   assert.deepEqual(again.socket.sent.filter((f) => f.type === 'poke'), [], 'nothing poked');
+});
+
+test('every interest listed in All interests carries the way in, in its own colours', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  const { world } = guitarMap(client);
+  click(client, 'explore-open');
+  client.emit({ type: 'chart', ...world.chart() });
+  const find = client.$('explorer-find');
+  find.value = 'piano';
+  find.dispatchEvent(new client.document.defaultView.Event('input', { bubbles: true }));
+
+  const row = client.$('explorer-found').querySelector('li');
+  assert.equal(row.querySelector('button:not(.join-dot) span').textContent, 'piano');
+  const join = row.querySelector('.join-dot');
+  assert.ok(join, 'beside the name');
+  assert.equal(join.getAttribute('aria-label'), 'Join piano');
+  assert.equal(join.querySelector('.label').textContent, 'Join');
+  // The square the map draws it with: its colour, in its own swatch.
+  const swatch = join.querySelector('svg.glyph');
+  assert.ok(swatch, 'wearing its swatch');
+  assert.equal(swatch.querySelector('rect').getAttribute('fill'), stroke('piano'));
+
+  join.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  assert.deepEqual(client.socket.sent.at(-1), { type: 'join', subject: 'piano' });
+  assert.equal(client.$('explorer-name').textContent, '', 'and joining is not also picking it');
+
+  // Held, it says so and there is nothing to press: leaving is done elsewhere.
+  client.emit({
+    type: 'state',
+    subscription: ['guitar', 'piano'],
+    funnel: 0,
+    rail: { held: ['guitar', 'piano'], suggested: [], popular: [], total: 2 },
+  });
+  const held = client.$('explorer-found').querySelector('.join-dot');
+  assert.equal(held.querySelector('.label').textContent, 'Yours');
+  assert.equal(held.getAttribute('aria-label'), 'piano, already yours');
+  assert.equal(held.disabled, true);
 });

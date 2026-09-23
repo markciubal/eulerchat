@@ -1,4 +1,5 @@
 import { NS, communityColour, stroke } from './diagram.js';
+import { glyphSwatch } from './glyphs.js';
 import { fitTo } from './minimap.js';
 import { TILT, clampTilt, heightOf, shade, view3d } from './relief.js';
 import { gestures } from './gestures.js';
@@ -578,6 +579,9 @@ export function mountExplorer(doc, hooks) {
     for (const [id, marks] of nodes) {
       for (const node of marks) node.classList.toggle('mine', held.has(id));
     }
+    // The lists carry Join beside every name, so they are drawn again too:
+    // joining from one is not worth doing if the row it was on still offers it.
+    if (showing === null) search(find.value);
     if (picked) select(picked);
   }
 
@@ -996,7 +1000,7 @@ export function mountExplorer(doc, hooks) {
       b.title = both;
       b.setAttribute('aria-label', `${link.id}, ${both}`);
       b.addEventListener('click', () => choose(link.id));
-      li.append(b);
+      li.append(b, joinButton(link.id));
       // The chat where the two meet, when there is one to open.
       const pair = hooks.pair?.(id, link.id);
       if (pair) {
@@ -1057,7 +1061,7 @@ export function mountExplorer(doc, hooks) {
       b.append(name, n);
       b.setAttribute('aria-label', `${s.id}, ${s.n ? people(s.n) : 'nobody yet'}`);
       b.addEventListener('click', () => choose(s.id));
-      li.append(b);
+      li.append(b, joinButton(s.id));
       found.append(li);
     }
     const li = doc.createElement('li');
@@ -1074,6 +1078,39 @@ export function mountExplorer(doc, hooks) {
   function choose(id) {
     flyTo(id);
     select(id, { say: true });
+  }
+
+  /**
+   * Join an interest from a list, beside its name.
+   *
+   * It wears the same swatch the map draws that interest with — its colour and
+   * its emblem, the square a chat's chip carries — so a row here and a patch
+   * of the map read as the same thing without anybody being told they are.
+   * One already held says so and does nothing: leaving is done where leaving
+   * is done, and a button that joins on one press and leaves on the next is a
+   * button that loses somebody an interest by mis-aiming.
+   */
+  function joinButton(id) {
+    const mine = (hooks.held?.() ?? new Set()).has(id);
+    const b = doc.createElement('button');
+    b.type = 'button';
+    b.className = `join-dot${mine ? ' mine' : ''}`;
+    b.append(glyphSwatch(doc, id, 14));
+    const word = doc.createElement('span');
+    word.className = 'label';
+    word.textContent = mine ? 'Yours' : 'Join';
+    b.append(word);
+    b.setAttribute('aria-label', mine ? `${id}, already yours` : `Join ${id}`);
+    b.title = mine ? `You hold ${id}` : `Join ${id}`;
+    if (mine) b.disabled = true;
+    else {
+      b.addEventListener('click', (evt) => {
+        // The row itself flies to the interest; the button only joins it.
+        evt.stopPropagation();
+        hooks.join?.(id);
+      });
+    }
+    return b;
   }
 
   // --- communities -----------------------------------------------------------

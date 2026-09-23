@@ -3,6 +3,12 @@
 A chat room shaped like an Euler diagram. Subjects are regions on a plane, the
 places where they overlap are rooms, and a coordinate is an address.
 
+It is anonymous by default and public by design: no accounts, no names to
+claim, and everything said in the clear readable by anybody without asking.
+[PRIVACY.md](PRIVACY.md) is the plain statement of what that means — who can
+see what, what the server keeps and for how long, what encryption does and
+does not do, and why there is no federation.
+
 ```
 npm i eulerchat      # the layout engine, or
 npx eulerchat        # the chat server
@@ -252,7 +258,7 @@ With it on, everything said in the clear is readable by anybody, without
 identifying themselves:
 
 ```
-GET /api/rooms                  every room, with populations and message counts
+GET /api/rooms                  rooms of up to three interests, with populations
 GET /api/rooms/{key}/log        one room's messages     ?since=&limit=
 GET /api/scrape                 everything, resumable   ?since=&limit=
 GET /api/receipts               the record of deletions ?since=
@@ -305,13 +311,17 @@ for (const m of copies) if (gone.has(await commitment(m))) drop(m);
 Naming them by id would work as well for whoever holds a copy, and would also
 tell anybody who had only seen an id, in a reply or a link, that the message
 went and why. A dump only ever shrinks, goes twelve hours after the last
-thing in it, and is only ever held in memory. A portal's messages are in no
+thing in it, and is only ever held in memory. At most 64 are kept, so on a busy
+server the oldest goes well inside its twelve hours. A portal's messages are in no
 dump, and a sealed message is its envelope, exactly as everywhere else here.
 
 `/streams` is that same public view in a page: the firehose live, filtered by
 kind or interest; the dumps, with how full the next one is; and the deletion
 record. It reads only what anybody can read, the way anybody would. The chat
 links to it from Settings, wherever the server publishes.
+
+What all of this adds up to for somebody deciding whether to use it or run it
+is in [PRIVACY.md](PRIVACY.md), in one page and in plain words.
 
 That openness is a decision about what this place *is*, and it has to be
 carried through the product rather than mentioned in a footnote. The interface
@@ -329,6 +339,16 @@ Two things the open side deliberately does not serve:
   the room they reported is a reporter who never reports again, which is a
   different kind of harm from publishing a conversation. Those sit behind
   `isModerator`. Opening them should be a decision taken on purpose.
+
+  A report also keeps its evidence — the author, their key, the time and **the
+  words** — because the message itself will not be there in a day. That copy
+  lives for thirty days, outlives the twelve hours, and is **not** removed when
+  the author deletes the message: deleting takes it out of the room, the dumps
+  and the open API, and leaves the reported copy where a moderator can read it.
+  For a sealed message the server has nothing to copy, so the reporter may
+  paste what they read, marked as their disclosure and not as something the
+  server could open. Either way, one reader can put words in front of a
+  moderator that everyone else's copy has forgotten.
 
 Mounted on your own server the API answers its own endpoints and stays silent
 on everything else, so a host route at `/api/me` keeps working. Move it out of
@@ -360,8 +380,9 @@ word for what it is called.
 **Claiming a key is not holding it.** Every key in the place is sent to
 everybody, so that messages can be sealed to it. A connection that says "this
 one is mine" has therefore said nothing, and until it has answered a challenge
-that only the private half can answer, its key is not written beside its name
-and gives it no standing of any kind:
+that only the private half can answer, its key is not written beside its name,
+is not what a returning visitor is recognised by, and counts for nothing with a
+moderator:
 
 ```js
 import { challenge, prove } from 'eulerchat/proof';
@@ -375,6 +396,13 @@ The check is a MAC under a secret the two keys agree, not "decrypt this and
 send it back" — a client that decrypts what it is handed and returns the
 plaintext is a decryption service, and a server could pass off a real sealed
 message as the challenge.
+
+**What an unproved claim does do.** It is relayed to every other open
+connection as it arrives, and it goes into the reader list that senders wrap
+message keys for, which filters on having a key rather than on having proved
+one. So claiming a key that is not yours does not get you a name, and it does
+get you wrapped keys you cannot open — harmless in itself, and the reason the
+list a message is sealed for is worth no more than the server assembling it.
 
 Two connections that show the same key are the same person: one member of a
 room, one vote, and closing one window is not leaving. Somebody who drops and
@@ -461,10 +489,21 @@ await unseal(envelope, stranger);  // null — not an error, just not for them
 ```
 
 The server keeps messages for twelve hours and then forgets them, on a sweep
-rather than on request, so that forgetting does not depend on anybody
-remembering to ask. What it dropped is written into a chain anybody can check;
-see **What deletion can and cannot show**, below. Anyone who wants a lasting copy can turn one on; it is kept
-by their own browser and it is theirs alone.
+every ten minutes rather than on request, so that forgetting does not depend on
+anybody remembering to ask. A room also holds no more than its last 500
+messages: past that the oldest falls off as each new one arrives, which is a
+cap on memory rather than a promise about time, and unlike the sweep it writes
+no receipt and tells nobody — so in a busy room the honest description is *the
+last 500 messages, and none older than twelve hours*.
+
+What the sweep and the delete button drop is written into a chain anybody can
+check; see **What deletion can and cannot show**, below. Anyone who wants a
+lasting copy can turn one on: it is kept by their own browser, and it is
+**every message they can read while it is on**, not only their own — including
+the plaintext of encrypted messages, written into `localStorage` after it is
+opened. The interface is in two minds about it: the box is labelled *Keep a copy of
+what I send* and the help beside it says "your browser keeps a copy of what is
+said here", which is the accurate one. See **Open privacy defects**.
 
 **What this does not do**, which matters more than what it does:
 
@@ -480,13 +519,33 @@ by their own browser and it is theirs alone.
   does not control, which is not built. A key that is kept between visits gives
   them something stable to compare — the letters after a name are its
   fingerprint — but the server still assembles the reader list, so that
-  narrows the gap and does not close it.
+  narrows the gap and does not close it. It also answers that question to
+  anybody who asks: the `readers` frame takes a room key from whoever sends it
+  and hands back the fingerprint and public key of everyone present, without
+  checking that the asker is in the room, or a member rather than a lurker.
+  That is a live defect — see **Open privacy defects** — and not a property
+  worth having.
 - **It does not hide who is talking to whom**, or when, or how often. The server
-  routes, so the server knows.
+  routes, so the server knows. The envelope says it out loud as well: it
+  carries the sender's public key, and the wrapped keys are filed under each
+  reader's fingerprint, so anybody holding the envelope — which the open API
+  serves to anybody at all — can read off who sent it and which keys it was
+  locked for. The words are the secret; the shape of the conversation is not.
+- **It does not survive the key.** The per-message key is used once and thrown
+  away, but it is wrapped by an agreement between two long-lived keys, so
+  whoever obtains one of those keys can open every envelope they have kept that
+  was wrapped for it. There is no forward secrecy here and none is claimed: a
+  key kept for a year is a year of envelopes waiting on it. **New key** in
+  Settings ends that, for everything sent afterwards.
 
-All three are said in the interface too, in those words. A product that
-implies more privacy than it delivers is worse than one that offers none,
-because people choose what to say based on what they think is true.
+The first and the third are said in the interface too, in those words,
+because a product that implies more privacy than it delivers is worse than one
+that offers none: people choose what to say based on what they think is true.
+The other two are not, and that is a gap rather than a decision — the help text
+says that only people in the chat can read an encrypted message, where the
+truth is the people connected with a key at that moment, and it says nothing
+about a dishonest server adding a key or about there being no forward secrecy.
+See **Open privacy defects**.
 
 If a message cannot be locked — no reader list, keys not made yet, the server
 unreachable — it is **not sent**. It stays in the box and says why. A request to
@@ -495,10 +554,13 @@ encrypt that cannot be honoured has to fail rather than quietly do the opposite.
 
 ## Surviving a restart
 
-The server keeps one small durable thing, and it is not the conversations. It
-is a hash of each message as it was posted, plus the record of deletions:
-sixty-four characters however long the message was, append-only, a single file
-you can read in a text editor.
+The server keeps one small durable thing, and it is not the conversations. Each
+line is a hash of one message as it was posted, the room it was posted in, when,
+and its number in order — sixty-four characters however long the message was,
+and never the words or who wrote them — plus the record of deletions.
+Append-only, a single file you can read in a text editor. The room and the time
+are the part that outlives the twelve hours: the file says that something was
+said in `art+philosophy` at a moment, and nothing else about it.
 
 ```
 eulerchat --ledger ./data/ledger.jsonl   # on by default
@@ -577,6 +639,13 @@ is the most any log can do.
 
 You can also delete your own message at any time. It leaves the same trail.
 
+**One inconsistency to know about.** The firehose names a deleted message by
+its commitment precisely so that nobody who had merely seen an id — in a reply,
+in a link — is told it went and why. The websocket does not: `forget` sends
+`{type:'forgotten', messageId}` to every open connection, the room's audience
+and everybody else alike. The words are gone either way; what leaks is that a
+particular id was deleted. See **Open privacy defects**.
+
 
 ## Words only
 
@@ -645,7 +714,7 @@ group's rooms. The map lays a group out with its frame left out of the
 placement (the atlas's `frames` option), so the same people are drawn room for
 room as they would be outside, and the frame goes round the result.
 
-**The name is published.** `GET /api/rooms` lists every occupied room, and a
+**The name is published.** The open side lists occupied rooms, and a
 group's room key contains its name — so a stranger scraping the open side gets
 `kite-fox-9` the moment anybody joins it, along with everything said inside.
 "Anyone who has the name can walk in" is true, and the set of people who have
@@ -669,10 +738,17 @@ link, `?watch=<room>`. Scanning it opens that one conversation to lurk in,
 which is close to a browser's private window:
 
 - **Reading along, not joining.** A lurker is not a member of anything. It is not
-  in the room's head count, not on the list an encrypted message is locked for (so
-  encrypted messages stay locked to it), and not told about anybody's key. The
-  server sends it that room's messages and nothing else (`World.look`, the
-  `watch` frame).
+  in the room's head count and not on the list an encrypted message is locked
+  for, so encrypted messages stay locked to it (`World.look`, the `watch`
+  frame).
+- **Sent more than it shows.** Every connection is greeted before it says what
+  it is, so a lurker is also handed a `welcome`, an empty `history` and a
+  `state` frame carrying the rail — the busiest dozen interests, a few
+  suggestions and the size of the catalogue — and it receives every key claim
+  made by anybody while it is connected, because those are broadcast to all
+  open connections. The page ignores the lot and shows one conversation. That
+  is the client being polite about frames the server should not have sent it,
+  and it is in **Open privacy defects** until the server stops.
 - **Counted, never named.** Each room says how many are lurking in it,
   on its chip, in its header and on its hover card. It is a number and never
   who, kept by the server's connections rather than the world, and the people
@@ -764,10 +840,24 @@ does leak stops working tomorrow. `portalsWith` returns today's and
 yesterday's, so a conversation survives midnight.
 
 The open read side does not carry these: not in `/api/rooms`, not in
-`/api/scrape`, not on the firehose, and asking for one by name gets the same
-404 a room that does not exist gets — a different answer would confirm the
-guess. The interface stops saying *everyone can read this* inside one, because
-there it would be false.
+`/api/scrape`, not on the firehose, not in the dumps, and asking for one by
+name gets the same 404 a room that does not exist gets — a different answer
+would confirm the guess. The interface stops saying *everyone can read this*
+inside one, because there it would be false.
+
+**The socket is another matter, and today it leaks.** Those filters are on the
+HTTP side only. To everything a connected browser is sent, a portal is an
+ordinary subject with no group prefix, so it passes the `clusterOf(id) === null`
+test that keeps groups out of the shared views — and a stranger who holds an
+interest one of the two also holds is sent the address. Confirmed by running
+it: the minimap (`overview`), All interests (`chart`), search, the popular
+list and the suggestions all carry a live portal address, and `atlasFor` hands
+a non-member the overlap room `art+portal-…` on their own map. The address is
+meant to be the whole of a portal's protection, so this is a hole in it and not
+a documentation wrinkle; it is listed in **Open privacy defects** until it is closed.
+The ledger writes one line per message with its room key, portals included, so
+an operator's disk also holds the addresses that were spoken in, and their
+times, after the words have gone.
 
 **What it does not do**, which matters more than what it does:
 
@@ -780,7 +870,8 @@ there it would be false.
 - **It is not a lock.** Anyone who learns today's address can join like anybody
   else; the routing has no idea portals exist. It is a door somewhere nobody
   else can find, not a door that refuses to open. The daily rotation is what
-  makes that survivable rather than fatal.
+  makes that survivable rather than fatal — and, while the socket carries the
+  address to strangers, what keeps yesterday's leak from being permanent.
 
 Still open: how the second person learns a portal has been opened. The server
 cannot be told without learning who is talking to whom, which is the thing
@@ -1326,6 +1417,14 @@ The page redraws at most every ten seconds for anything but its own change.
 - **Picking one.** Pressing a dot shows its name, its place (`arts › visual
   art`) and how many hold it, with **Join**, **Leave**, **Open its
   conversation** and **Browse** its field in the interests list.
+- **Joining one, from wherever it is named.** Every row in the lists beside the
+  sheet — the matches for a search, and the interests often held with the one
+  picked — carries **Join** next to the name, wearing that interest's own
+  swatch: the same square, colour and emblem the map draws it with, and the
+  same one a chat's chip carries, so a row here and a patch of the map read as
+  the same thing. One already held says *Yours* and does nothing; leaving is
+  done where leaving is done, since a button that joins on one press and leaves
+  on the next loses somebody an interest by mis-aiming.
 - **Finding one.** Typing lights the matches, dims the rest and lists the first
   eight, and Enter flies to the first. That is also the way round it without a
   pointer: a thousand dots are not something to tab through.
@@ -1773,7 +1872,18 @@ What it does **not** survive is being scaled out:
   no symptom beyond people not hearing each other. This is the blocker, and it
   is the only one that needs architecture rather than code.
 - **A dyno restart empties the world.** Heroku cycles dynos at least daily, and
-  every deploy does the same. Every message and membership is gone.
+  every deploy does the same. Every membership is gone, and every message with
+  it unless somebody's browser kept a copy to hand back (**Surviving a
+  restart**) — which needs the anchor to still be there, and by default the
+  anchor is a file in the working directory that the same restart wipes. On a
+  platform with an ephemeral filesystem, point `--ledger` (or
+  `EULERCHAT_LEDGER`) at a mounted disk, or accept that restoring will never
+  match anything.
+- **The anchor only grows.** One line per message, for ever: a hash, the room
+  key, the time and a sequence number. It is loaded whole at boot, nothing
+  prunes it, and the room keys in it include groups and portals. It is small
+  per message and it is a permanent record of which rooms were spoken in and
+  when, long after the words have gone.
 - **Solving blocks the event loop.** Layouts run on the main thread, so a burst
   of first paints stalls all other traffic — worse on a shared-CPU dyno than on
   a laptop.
@@ -1804,9 +1914,64 @@ The pure algebra in `lib/` is already independent of where state lives; only
   and is already content-addressed, so it is shareable as-is.
 - **Messages and memberships → Postgres**, with Redis as the hot index.
 
+## Federation, and what there is instead
+
+There is none. No ActivityPub, no relays, no server-to-server anything, not a
+line of it. Two eulerchat servers are two separate places with two separate
+maps, and nothing here will ever make them one.
+
+That is not an oversight waiting on a library. The map is the product, and the
+map is a function of one census: a room exists because the same people hold
+both of its interests, and its ground is the number of them. Compose two
+populations that never met and every zone is wrong — the overlaps are between
+people who are not in the same place, so the picture would assert a room that
+nobody is in. Federating this means federating the census, not shuttling
+messages, and the honest list of what that needs is:
+
+- **One census, or an agreed way to compose several.** Populations add; the
+  regions they make do not, and `T ⊆ S` routing is only true of a population
+  that is actually there to be routed to.
+- **Identity that crosses.** A key is made in a browser and proved to one
+  server (**Who somebody is**). There is no directory, nothing signs for anyone
+  else, and a fingerprint from another place means nothing here.
+- **Deletion that crosses.** The receipt chain is one server's own history, and
+  a `forgotten` event is a request to whoever holds a copy, not a command.
+  Nothing can compel a mirror elsewhere to forget, and a federation that cannot
+  is a federation that quietly makes deletion a lie.
+- **Moderation that crosses**, which is unsolved here for one server (**Known
+  limits**) and worse across several.
+- **Sealing that crosses.** The reader list for an encrypted message is
+  assembled by the server (**Sealing, and what sealing is not**); two servers
+  assembling it is two chances to add a key.
+
+**What exists instead is one-way distribution**, and it is deliberate. Everything
+said in the clear goes out on a firehose anybody can connect to without saying
+who they are, and is gathered into public dumps of up to a megabyte for whoever
+was not listening (**This place is public**). One writer, any number of readers,
+no accounts, no negotiation. Mirror it, archive it, index it, draw something
+else with it: the dumps are NDJSON, the deletion receipts verify anywhere with
+`lib/receipt.js`, and the layout engine in `lib/` has no server in it. What no
+reader can do is write back, which is exactly why there is nothing to agree on.
+
+The place also distributes rather than hoards in the other direction: it keeps
+messages for twelve hours, keeps no conversations on disk at all, and gets them
+back after a restart from the browsers that chose to keep a copy, checked
+against a hash it committed to at the time (**Surviving a restart**). The
+durable thing here is the anchor, not the archive.
+
+**Not to be confused with scaling out.** *What sharing state would take*, above,
+is one place across several processes — same population, same census, shared
+through Redis and Postgres. That is an engineering job with a known shape.
+Federation is many places, and the question it has to answer first is what a
+room even means when the people are not in the same room.
+
 ## Known limits
 
-- **State is in memory.** Restarting resets the world.
+- **State is in memory.** Restarting empties the world: every membership, every
+  room and every message. What survives is the anchor — a hash of each message,
+  its room and its time, plus the deletion chain — and the conversations only
+  come back from the browsers that chose to keep a copy, and only what they
+  kept. See **Surviving a restart**.
 - **Solving blocks the event loop.** Every layout runs on the main thread, so a
   burst of first paints stalls all other traffic. Fine at prototype
   concurrency, not at a thundering herd.
@@ -1841,3 +2006,41 @@ The pure algebra in `lib/` is already independent of where state lives; only
 - **Subject colours can collide.** Hues come from a hash of the name, which is
   stable across reloads but says nothing about what else is on screen, so a
   view can come up with three neighbouring blues.
+
+### Open privacy defects
+
+These are not decisions. They are places where the code gives away more than
+the design says it does, found by reading it against this file, and they are
+written here rather than quietly fixed in the prose. Each is a small change to
+the server; none is architectural.
+
+- **A portal's address reaches strangers over the socket.** The filters that
+  keep portals off the open API were never added to the shared views a browser
+  is sent, so the minimap, All interests, search, the popular list, the
+  suggestions and the map itself carry a live portal address to anybody holding
+  an interest one of the two people also holds. The address is the whole of a
+  portal's protection. See **A portal**.
+- **`readers` answers for any room, to anybody.** It takes a room key from the
+  asker and hands back the key fingerprint and public key of everyone present,
+  with no check that the asker is in the room and none that it is a member
+  rather than a lurker. It exists so a sender can wrap message keys; it will
+  also enumerate who is in a room you have merely guessed the name of.
+- **`forget` names the message id to every connection**, rather than to the
+  room's audience, and the firehose deliberately does the opposite.
+- **A lurker is sent frames it has no business with**: the rail, and every key
+  claimed while it is connected. The page ignores them; the server should not
+  send them.
+- **A busy room loses its oldest messages with no receipt.** The 500-per-room
+  cap evicts silently, outside the sweep, so those messages leave no entry in
+  the deletion record and no `forgotten` event, and stay in whatever public
+  dump already carried them.
+- **"Keep a copy of what I send" keeps more than that.** It keeps every message
+  the browser can read while it is on, the plaintext of encrypted ones
+  included, and offers them back to the server on reconnect. Either the label
+  or the behaviour is wrong; the behaviour is what the restore path was built
+  for, so it is probably the label.
+- **The interface states two of sealing's four limits.** That a dishonest
+  server can add a key, and that there is no forward secrecy, are in this file
+  and nowhere a person using it would look. The help text also says only
+  *people in the chat* can read an encrypted message, where the truth is the
+  people connected with a key at that moment.
