@@ -125,7 +125,11 @@ function rowFor(event) {
     // Nobody left in it: nothing to watch.
     what.append(el('span', 'room', roomOf(event.room)));
   } else if (event.type === 'forgotten') {
-    const why = { expired: 'past their twelve hours', asked: 'at their author’s request' }[event.reason] ?? event.reason;
+    const why = {
+      expired: 'past their twelve hours',
+      asked: 'at their author’s request',
+      removed: 'with the made-up people who said them',
+    }[event.reason] ?? event.reason;
     // Named by their commitments and the record's hash, never by their ids.
     // A dump older than that named them by id, and says only how many.
     const commitments = event.commitments ?? [];

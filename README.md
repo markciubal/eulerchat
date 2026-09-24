@@ -675,6 +675,81 @@ was: shapes made in code. The emblems beside subject names are that — see
 can contain one.
 
 
+## How much swearing to put up with
+
+Muting is the only thing anybody here can do about somebody else, and it is
+done in the browser: the server is never told, the person is never told, and
+it is undone in Settings. What the settings add is how much to put up with
+before it happens without being asked.
+
+**Muting asks first, and holds the room still while you decide.** Pressing
+*mute* on a message puts a question at the foot of the conversation rather than
+doing it there and then: it is the one action here that is about a person
+rather than a message, it is easy to hit by accident on a phone, and afterwards
+it is invisible except in Settings. While the question stands:
+
+- **the room is held still** — anything said meanwhile is kept back and
+  counted, so nothing moves under somebody reading back to decide, whatever
+  asked for the redraw;
+- **everything else still works** — other messages can be read, replied to,
+  reported, and pressed;
+- **pressing mute on anybody else adds them to the same question**, since
+  deciding about one person usually means deciding about the people around
+  them. The button counts them: *Mute 2*.
+
+Answered yes, the mutes happen together and the room says how far behind it now
+is — *1 message arrived while you decided* — and offers **Stay here** or **Jump
+to recent**, because a room that jumps you to the newest message has lost your
+place on your behalf. Answered no, or left for another chat, nothing is muted
+and the room runs on. The tolerance settings above mute without asking, which
+is what choosing them said to do.
+
+**A mute is one person, by the key they proved.** The tag it goes by is the
+fingerprint the letters after their name are — the only name of theirs that
+outlives a visit — and what is written down is a digest of that tag rather
+than the tag itself, so the list in a browser is not a plain list of everybody
+its owner cannot stand. It is a digest and not a secret: anybody holding the
+fingerprint can run it through the same three lines and compare. Somebody with
+no key is matched by the connection that posted, which is this visit's name for
+them and nobody's tomorrow, so that kind of mute holds while the page is open
+and is never written down. Two people called *wren* under two keys are two
+people, and muting one says nothing about the other.
+
+**Settings → Muting and reporting → the button beside *Offer to mute people who
+use profanity*.** Three choices:
+
+| | |
+|---|---|
+| **Forgive 10 a day** | the eleventh from that person mutes them |
+| **Forgive 5 a day** | the sixth does |
+| **No tolerance** | the first does, and the message is not shown at all |
+
+Ten a day to begin with, and the offer to mute still comes first: the earlier
+ones bring the same *they used profanity — mute them?* line as before, which is
+a question rather than something done to somebody.
+
+- **Counted for each person separately.** One person's bad afternoon is not
+  everybody's, so a tally belongs to whoever ran it up.
+- **Forgotten at the end of the day.** A tally that never resets is a ban with
+  extra steps, and this is not a ban: it is one reader's patience.
+- **No tolerance means not shown.** At nought the message is not folded away as
+  a muted person's words are — it is not drawn at all. Somebody who has asked
+  to see none of it has not asked to see the first one. What that person said
+  *before* they swore folds away as any muted person's does, and can still be
+  opened.
+- **A lurker counts nothing and keeps nothing.** Quick join promises that
+  nothing is written to that device, tallies included; see **Quick join, to
+  lurk**.
+- **It is this browser's opinion, and nothing else's.** The counts and the
+  choice live in `localStorage`; nothing about either reaches the server, and
+  nobody else's view of the room changes.
+
+What counts as profanity is `lib/flag.js`, the same vocabulary the report
+reasons use — a word list with letter substitutions folded out, so `a$$` is the
+word it is trying to be. It is a word list, which means it is wrong at the
+edges in both directions; that is why the gentler settings ask rather than act,
+and why the strict one is a choice somebody has to make for themselves.
+
 ## Small groups, by name
 
 `kite-fox-9/art` is a different subject from `art`. That is the entire
@@ -800,7 +875,9 @@ walking into something.
   that no person has spoken in for three minutes, and never twice running. None
   go inside a group or a portal, and a machine question never interrupts
   anybody: it is counted, not notified.
-- **Mutable.** **Settings → Alerts → System messages** mutes the lot of them,
+- **Mutable.** **Settings → Muting and reporting → System messages** mutes the
+  lot of them — beside muting people, since it is the same question asked about
+  the other kind of author —
   which is worth having in a demo, where fifty thousand made-up people are
   talking. Muted, the server is told `{ system: false }` and stops telling this
   page about them at all, so they are not counted as unread either; the
@@ -1631,6 +1708,68 @@ the other steps close it again. The card stands *inside* that sheet while it is
 open, because everything outside an open modal dialog is inert and a tour that
 could be seen and not pressed would be a picture of a tour.
 
+### The hose
+
+The map says *where* conversations are; a chat says *what* is in one. Neither
+answers the question somebody holding nine interests actually has, which is
+whether anything is happening. **Hose**, beside Chats on the map, is that: one
+stream of everything said in the chats you are in, newest first
+(`public/hose.js`).
+
+- **Each line wears its chat's own squares** — the interest's colour and
+  emblem, the same ones on its chip and its patch of the map — so a line here
+  and a shape there are recognisably the same chat without reading a name.
+  Three at most, then how many more, as a chip does.
+- **Two ways in.** *View context* opens that chat. *Jump* opens it at that
+  message and lights it where it stands, among what was said around it, which
+  is the point of going there rather than reading it in the stream.
+- **It is what already arrives.** Nothing is fetched for it: these are the
+  messages the server already sends for the rooms you are in. It keeps the
+  last 200 and drops the rest.
+- **It shows what a chat would show.** Somebody muted is absent from it, and so
+  is anything hidden by **no tolerance** for profanity; an encrypted message
+  says so rather than showing an envelope; a system message is labelled as one,
+  here as everywhere.
+- **Pause holds it still** and says how many arrived meanwhile, because a line
+  that moves out from under the pointer on its way to being read is worse than
+  a line that waits. A badge on the button counts what has arrived for chats
+  other than the one on screen.
+- **A line can outlive its message.** Nothing here is kept longer than twelve
+  hours, so *Jump* may find the message gone; it says so rather than doing
+  nothing.
+
+### While nobody is doing anything
+
+Three seconds after the last thing anybody did — no pointer, no key, no wheel,
+no touch — the map's footer says **Busy near you**: at most three chats that
+are both lively and near what this person holds (`public/nearby.js`). It goes
+the instant anything moves.
+
+Somebody who has stopped moving is either reading or deciding what to read, and
+only the second of those wants help; waiting for the stillness is how the page
+tells them apart without asking. Nothing is fetched for it — it is the map
+already in hand.
+
+- **Near** is one of two things. *Beside you*: the chat is about an interest
+  you hold, so it is a room you could walk into, or one you are in. *One
+  along*: it is about an interest in the same community as something you hold
+  — what the same people turn up to (**Communities**) — which is the shortest
+  honest hop from where you are. Anything further is not nearby, and is left to
+  All interests, which is the place for looking further afield on purpose.
+- **Busy means spoken in, not big.** A room of nine hundred that nobody has
+  said anything in since this morning is not where something is happening, and
+  sending anybody there would be sending them to an empty room with a large
+  number over the door. A chat of one, or one nothing was ever said in, is
+  never offered.
+- **Each is a chip in its own colours**, with why it is being offered beside
+  the name — *next to art*, *yours, and busy*, *one along* — because a
+  suggestion that does not say where it came from is a thing to be suspicious
+  of. Pressing one opens that chat.
+- **It keeps quiet** for a lurker, who came for one conversation; while the
+  tour is running, which is already pointing at things; while the hose is open,
+  which is the same question answered at more length; and while any sheet is
+  open over the map, which means somebody is in the middle of something.
+
 ### Small things that help
 
 - **Every chat of yours is in the list.** The map draws a handful of
@@ -1852,6 +1991,47 @@ is not always possible at all — and it does not respond to more space or a
 finer grid, so it is reported (`report.disconnected`, `report.worstSplit`)
 rather than papered over. The default is five.
 
+## Statistics, worked out in the browser
+
+**Settings → Statistics → Work them out.** Numbers about the place: how much of
+the catalogue anybody holds, how many chats are on this map and how many people
+are in them, the average, the busiest and the liveliest, how many messages are
+being held, and how much this browser has written to its own disk.
+
+Every one of them is arithmetic done here, on frames the page already has
+(`public/stats.js`): the catalogue All interests is drawn from, the map in
+front of you, and `localStorage`. There is no statistics endpoint and no
+aggregate computed on the server — the one thing pressing it asks for is the
+public catalogue, which is the same `chart` frame that sheet fetches anyway. So
+what the numbers cover is exactly what this page can see, which is the point of
+doing it this way rather than being handed a total.
+
+**The working is shown with the answers.** *How these were worked out* opens a
+log naming each frame, what was counted in it and the arithmetic done to it:
+
+```
+chart frame (shape 7a0c3a23…) · 1,127 interests
+  with anybody in them: 457 of 1,127
+  holdings added up: 757 = sum of each interest's holders
+  communities: 27, biggest 5
+atlas frame (shape 4a559db6…) · 8 chats drawn
+  populations: 8, 2, 3, 3, 1, 5, …
+  average per chat: 36 ÷ 8 = 4.5
+  messages held in them: 0 (the last twelve hours, and 500 a chat at most)
+this browser · 9 keys, 14.2 kB (two bytes a character, as a browser stores them)
+not visible from here · the server's disk and memory, how many people there are,
+  anything said in a chat this page is not in, and anybody's interests but your own
+```
+
+Two things it will not do. It does not call holdings people: adding up how many
+hold each interest counts one person once per interest they hold, and the row
+says so rather than presenting it as a population. And it does not guess at
+what the page cannot see — the server's disk, the size of the world, a chat
+nobody here is in — it names those as unknown from here. A number invented to
+fill a row is worse than an empty row. **Copy** puts the answers and the
+working on the clipboard together, because a statistic without its derivation
+is a claim.
+
 ## Populate with machines
 
 A fresh server is the catalogue and nobody in it, which is the honest start for
@@ -1877,6 +2057,14 @@ a different number while they are there asks for that many instead.
   population, not a conversation. Made-up people who talk are the demo's
   business (`npm run demo`), and every word they say there is labelled a system
   message.
+- **Their words go with them.** Removing somebody does not touch what they
+  said — `removeUser` drops a membership and a profile and nothing else — so
+  anything a made-up person had said would go on being counted in the tallies,
+  in how tall a room stands, and in the dumps, for somebody who is no longer
+  anywhere. Turning them off forgets those messages too (`World.forgetFrom`),
+  with a receipt chained to the one before it like every other deletion, under
+  the reason `removed`. Nothing a real person said is touched, and people who
+  said nothing leave no receipt at all.
 - **They are made up, and the interface says so.** The section is called
   *Made-up people* and says what pressing it does.
 - **Capped at `MACHINES_MOST`**, twenty thousand. The census counts every

@@ -160,6 +160,16 @@
       <symbol id="icon-tour" viewBox="0 0 24 24">
         <path d="M4 3l16 7.6-7.3 1.8-2 7.2z" fill="currentColor" stroke-linejoin="round" />
       </symbol>
+      <symbol id="icon-hose" viewBox="0 0 24 24">
+        <path d="M4 5h5v5H4z" />
+        <path d="M9 7.5h4a3 3 0 0 1 3 3V13" />
+        <path d="M13.5 16.5c0 1.4 1.1 2.5 2.5 2.5s2.5-1.1 2.5-2.5S16 13 16 13s-2.5 2.1-2.5 3.5z" />
+      </symbol>
+      <symbol id="icon-chart" viewBox="0 0 24 24">
+        <path d="M4 20V4" />
+        <path d="M4 20h16" />
+        <path d="M8 20v-6M12.5 20V8M17 20v-9" />
+      </symbol>
       <symbol id="icon-robot" viewBox="0 0 24 24">
         <rect x="4" y="8" width="16" height="11" rx="3" />
         <path d="M12 4.5V8" />
@@ -345,15 +355,25 @@
               <button id="bell" type="button" class="bell" title="Desktop alerts for mentions and small rooms">
                 <svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-bell" /></svg><span class="label">Alerts off</span>
               </button>
-              <!-- What the server writes rather than a person: a question to
-                   start a quiet chat, and everything the made-up people of a
-                   demo say. Muted, they are folded away in the room and never
-                   counted as unread; see `hushSystem`. -->
-              <button id="hush-system" type="button" class="bell" aria-pressed="false"
-                      title="Fold away messages written by the server, and stop them counting as unread">
-                <svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-hush" /></svg><span class="label">System messages on</span>
-              </button>
             </div>
+          </section>
+
+          <!-- Numbers about this place, worked out here rather than asked
+               for: everything in them comes from frames this page already
+               has. The working is shown beside the answers. See
+               `public/stats.js`. -->
+          <section id="stats" class="settings">
+            <h3 data-help="stats">Statistics</h3>
+            <div class="settings-row">
+              <button id="stats-go" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-chart" /></svg>Work them out</button>
+              <button id="stats-copy" type="button" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-copy" /></svg><span class="label">Copy</span></button>
+            </div>
+            <dl id="stats-rows" class="stats-rows"></dl>
+            <p id="stats-missing" class="settings-note"></p>
+            <details id="stats-working" class="stats-working" hidden>
+              <summary>How these were worked out</summary>
+              <pre id="stats-log" class="stats-log"></pre>
+            </details>
           </section>
 
           <!-- A random population, for a world with nobody in it yet: made-up
@@ -413,10 +433,41 @@
             <ul id="muted-list" class="muted-list" aria-label="Muted people"></ul>
             <p id="muted-none" class="settings-note">Nobody. Choose mute on a message to stop
               seeing what someone says.</p>
-            <label class="settings-check" for="offer-mute">
-              <input type="checkbox" id="offer-mute" checked />
-              Offer to mute people who use profanity
-            </label>
+            <!-- The other thing that can be muted, beside the people: what the
+                 server writes rather than a person — a question to start a
+                 quiet chat, and everything the made-up people of a demo say.
+                 Muted, they are folded away in the room and never counted as
+                 unread; see `hushSystem`. -->
+            <div class="settings-row">
+              <button id="hush-system" type="button" class="bell" aria-pressed="false"
+                      title="Fold away messages written by the server, and stop them counting as unread">
+                <svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-hush" /></svg><span class="label">System messages on</span>
+              </button>
+            </div>
+            <div class="settings-row profanity-row">
+              <label class="settings-check" for="offer-mute">
+                <input type="checkbox" id="offer-mute" checked />
+                Offer to mute people who use profanity
+              </label>
+              <!-- How much of it to put up with before muting somebody without
+                   asking. Beside the offer, since it is the same subject. -->
+              <button id="profanity-open" type="button" class="icon-button"
+                      aria-expanded="false" aria-controls="profanity-pop"
+                      aria-label="How much profanity to forgive"
+                      title="How much profanity to forgive"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-settings" /></svg></button>
+            </div>
+            <div id="profanity-pop" class="popout profanity-pop" hidden>
+              <h4 class="popout-head" data-help="profanity">Profanity</h4>
+              <p class="settings-note">Counted for each person separately, and forgotten at
+                the end of the day. Whoever goes past it is muted for you alone: the server is
+                never told, and nor are they.</p>
+              <div id="profanity-choices" class="profanity-choices" role="radiogroup" aria-label="How much profanity to forgive">
+                <label class="settings-check"><input type="radio" name="profanity" value="10" /> Forgive 10 a day, then mute them</label>
+                <label class="settings-check"><input type="radio" name="profanity" value="5" /> Forgive 5 a day, then mute them</label>
+                <label class="settings-check"><input type="radio" name="profanity" value="0" /> No tolerance: hide the message and mute at once</label>
+              </div>
+              <p id="profanity-said" class="settings-note"></p>
+            </div>
             <!-- Reporting's explanation lives here, beside muting, the other
                  thing to do about somebody, rather than as a lone (i) under
                  every chat's name. -->
@@ -512,6 +563,31 @@
           </div>
         </div>
 
+        <!-- Muting somebody is asked about rather than done: the room is held
+             still while the question stands, so nothing moves under whoever is
+             deciding, and other messages can be pressed in the meantime —
+             including their mute, which adds that person to the same question.
+             See `proposeMute`. -->
+        <div id="mute-ask" class="mute-ask" role="alertdialog" aria-labelledby="mute-ask-said" hidden>
+          <p id="mute-ask-said" class="mute-ask-said"></p>
+          <p class="mute-ask-note">The room is held still while you decide. Press mute on anybody
+            else to add them to this.</p>
+          <div class="mute-ask-ways">
+            <button id="mute-ask-yes" type="button" class="join-here">Mute</button>
+            <button id="mute-ask-no" type="button">Cancel</button>
+          </div>
+        </div>
+
+        <!-- Done, and the room has moved on in the meantime: stay where the
+             eye was, or go to what has arrived since. -->
+        <div id="mute-after" class="mute-ask" role="status" hidden>
+          <p id="mute-after-said" class="mute-ask-said"></p>
+          <div class="mute-ask-ways">
+            <button id="mute-after-stay" type="button">Stay here</button>
+            <button id="mute-after-jump" type="button" class="join-here">Jump to recent</button>
+          </div>
+        </div>
+
         <p id="replying" class="replying" hidden></p>
 
         <!-- In place of the box you type in, for a lurker: who can see them
@@ -599,6 +675,11 @@
            Explore and then into the list, left to right and then down, the
            order they are read in. -->
       <div class="map-float map-float-left">
+        <button id="hose-open" type="button" class="map-button"
+                title="Everything being said in the chats you are in">
+          <svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-hose" /></svg>Hose
+          <span id="hose-waiting" class="tab-badge" hidden></span>
+        </button>
         <button id="rooms-open" type="button" class="map-button pop-toggle"
                 aria-expanded="false" aria-controls="rooms-pop">
           <svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-list" /></svg>Chats
@@ -713,6 +794,13 @@
           <button id="branch-join-some" type="button" hidden><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-list" /></svg>Join some</button>
           <button id="branch-back" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-map" /></svg>Back to my map</button>
         </div>
+        <!-- Three seconds of nobody doing anything: what is busy near what
+             they hold, worked out here from the map already drawn. Gone the
+             moment they move. See `public/nearby.js`. -->
+        <div id="nearby" class="nearby" role="status" hidden>
+          <p class="nearby-head">Busy near you</p>
+          <ul id="nearby-list" class="nearby-list"></ul>
+        </div>
         <div class="fit-row" data-help="fit"><p id="fit" class="fit"></p></div>
       </div>
 
@@ -723,6 +811,23 @@
       <svg id="diagram" role="img" aria-describedby="fit"
            aria-label="A map of the interests in view. Where interests overlap there is a chat. Every chat on this map is also listed under the Chats button."></svg>
     </section>
+
+    <!-- Everything said in the chats this person is in, as it is said, with
+         the way into each: the chat, or the message itself. See
+         `public/hose.js`. -->
+    <dialog id="hose" class="map-modal hose" aria-labelledby="hose-title">
+      <div class="map-modal-bar">
+        <span class="modal-title" data-help="hose"><strong id="hose-title">Hose</strong></span>
+        <span id="hose-held" class="hose-held" hidden></span>
+        <button id="hose-pause" type="button" aria-pressed="false">Pause</button>
+        <button id="hose-close" type="button"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-close" /></svg>Close</button>
+      </div>
+      <div class="hose-body">
+        <ul id="hose-list" class="hose-list" aria-label="Everything said in your chats, newest first"></ul>
+        <p id="hose-none" class="hose-none">Nothing said yet in the chats you are in. Anything that arrives will
+          appear here, newest first.</p>
+      </div>
+    </dialog>
 
     <!-- A short tour: a ring round the thing being talked about, a card
          saying what it is, and a small arrow that follows the pointer and

@@ -115,6 +115,41 @@ export const HELP = {
     more:
       'You are not told about every message. Busy chats only show a count.',
   },
+  hose: {
+    title: 'Hose',
+    short:
+      'Everything said in the chats you are in, as it is said, newest first.',
+    more:
+      'The map says where conversations are and a chat says what is in one; '
+      + 'this says whether anything is happening. Each line wears the same '
+      + 'squares the map draws its chat with. View context opens that chat; '
+      + 'Jump opens it at that message and lights it where it stands. Nothing '
+      + 'is fetched for this \u2014 it is the messages that arrive anyway.',
+  },
+  profanity: {
+    title: 'Profanity',
+    short:
+      'How much swearing to put up with from one person in a day before this '
+      + 'browser mutes them for you.',
+    more:
+      'Ten a day, five a day, or none at all. Counted for each person '
+      + 'separately and forgotten at the end of the day. At no tolerance the '
+      + 'message is not shown at all, rather than folded away. Muting happens '
+      + 'here and nowhere else: the server is never told, the person is not '
+      + 'told, and you can undo any of it in this panel.',
+  },
+  stats: {
+    title: 'Statistics',
+    short:
+      'Numbers about this place, worked out in your own browser from what this '
+      + 'page can already see.',
+    more:
+      'Nothing is asked of the server for them: they come from the catalogue All '
+      + 'interests is drawn from, the map in front of you, and what this browser '
+      + 'keeps on its own disk. The working is shown beside the answers. What '
+      + 'cannot be seen from here — the server’s disk, how many people there '
+      + 'are, anything in a chat you are not in — is said rather than guessed.',
+  },
   machines: {
     title: 'Made-up people',
     short:

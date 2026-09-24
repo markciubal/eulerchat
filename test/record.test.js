@@ -1361,8 +1361,14 @@ test('swearing brings an offer to mute, once, and muting folds them away', async
   assert.match(log, /3 messages from someone you muted/, 'into one line, not three');
   assert.match(log, /Scunthorpe/, 'and nobody else is');
 
-  // Held by key, in this browser, and listed where it can be undone.
-  assert.deepEqual(JSON.parse(client.store.get('eulerchat.muted')).map((m) => m.who), ['key:KEYwren1']);
+  // Held by key, in this browser, and listed where it can be undone. What is
+  // written down is a digest of the fingerprint rather than the fingerprint:
+  // the list is not a plain list of who you cannot stand.
+  const kept = JSON.parse(client.store.get('eulerchat.muted'));
+  assert.equal(kept.length, 1);
+  assert.match(kept[0].who, /^[0-9a-f]{16}$/, 'a digest');
+  assert.ok(!JSON.stringify(kept).includes('KEYwren1'), 'and never the key itself');
+  assert.equal(kept[0].name, 'wren', 'the name stays, since the list is read by a person');
   assert.match(client.$('muted-list').textContent, /wren/);
   assert.equal(client.$('muted-none').hidden, true);
 
@@ -1378,6 +1384,7 @@ test('swearing brings an offer to mute, once, and muting folds them away', async
 });
 
 test('a mute follows the key, survives a reload, and stops the badge', async () => {
+  // Written by an older browser, before the list was digested: still a mute.
   const client = await loadClient({
     storage: { 'eulerchat.muted': JSON.stringify([{ who: 'key:KEYwren1', name: 'wren', keyId: 'KEYwren1' }]) },
   });
@@ -3303,4 +3310,367 @@ test('pressing Tour also answers the arrow: it stops watching, and is asked back
     Object.assign(new again.document.defaultView.Event('pointermove', { bubbles: true }), { clientX: 900, clientY: 40 }),
   );
   assert.equal(again.$('tour-nib').style.transform, 'rotate(45.0deg)', 'and it stays up');
+});
+
+test('statistics are worked out in the browser, and show their working', async () => {
+  const client = await loadClient({ storage: { 'eulerchat.name': 'wren' } });
+  arrive(client.emit);
+  const press = (node) => node.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  const said = () =>
+    [...client.$('stats-rows').children].map((node) => node.textContent);
+
+  const before = client.socket.sent.length;
+  press(client.$('stats-go'));
+  // The only thing the press asks for is the catalogue, which is public and is
+  // what All interests fetches anyway. No statistics frame and no aggregate
+  // from the server: the arithmetic happens here.
+  assert.deepEqual(client.socket.sent.slice(before), [{ type: 'chart' }]);
+
+  // The map it is looking at is counted at once.
+  assert.ok(said().some((line) => line === 'Chats on this map'));
+  assert.ok(said().some((line) => /^Average people per chat/.test(line)));
+  assert.match(client.$('stats-missing').textContent, /All interests/, 'and what is missing is named');
+
+  // The working is there to read, and says where each number came from.
+  const log = client.$('stats-log').textContent;
+  assert.match(log, /atlas frame/);
+  assert.match(log, /average per chat/);
+  assert.match(log, /this browser/);
+  assert.match(log, /not visible from here/);
+  assert.match(log, /server/);
+
+  // The catalogue arriving fills in the rest, without being asked again.
+  const world = seed(new World());
+  client.emit({ type: 'chart', ...world.chart() });
+  assert.ok(said().some((line) => line === 'Interests in the catalogue'));
+  assert.equal(client.$('stats-missing').textContent, '', 'nothing missing now');
+  assert.equal(client.socket.sent.filter((f) => f.type === 'chart').length, 1);
+});
+
+test('how much profanity is forgiven is settable, counted per person, and per day', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  clickRoom(client, 'art');
+  const press = (node) => node.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  const choose = (value) => {
+    const box = [...client.document.querySelectorAll('#profanity-choices input')].find((b) => b.value === value);
+    box.checked = true;
+    box.dispatchEvent(new client.document.defaultView.Event('change', { bubbles: true }));
+  };
+  const swear = (fields) => client.emit(said({ body: 'this is shit', ...fields }));
+  const lines = () => [...client.document.querySelectorAll('#log li')].map((li) => li.textContent);
+  const muted = () => [...client.document.querySelectorAll('#muted-list li')].length;
+
+  // The button beside the offer opens the choices, and says what is counted.
+  assert.equal(client.$('profanity-pop').hidden, true);
+  press(client.$('profanity-open'));
+  assert.equal(client.$('profanity-pop').hidden, false);
+  assert.equal(client.$('profanity-open').getAttribute('aria-expanded'), 'true');
+  assert.deepEqual(
+    [...client.document.querySelectorAll('#profanity-choices input')].map((b) => b.value),
+    ['10', '5', '0'],
+  );
+  assert.match(client.$('profanity-said').textContent, /Nothing counted today/);
+
+  // Five a day: the fifth is still shown, the sixth mutes them.
+  choose('5');
+  for (let i = 1; i <= 5; i++) swear({ ...wren, id: `w${i}` });
+  assert.equal(muted(), 0, 'five is forgiven');
+  assert.match(client.$('notice').textContent, /^$|Muted/, 'nothing said yet about muting');
+  swear({ ...wren, id: 'w6' });
+  assert.equal(muted(), 1, 'the sixth is not');
+  assert.match(client.$('notice').textContent, /6 profane messages today, past the 5 you forgive/);
+  // Their words are folded away, as a muted person's are, and can be shown.
+  assert.ok(client.document.querySelector('#log .muted-run'), 'folded, not vanished');
+
+  // Counted per person: somebody else starts from nothing.
+  const other = { author: 'rook', authorId: 'id-rook', authorKey: 'KEYrook1' };
+  swear({ ...other, id: 'r1' });
+  assert.equal(muted(), 1, 'one person\u2019s tally is not everybody\u2019s');
+
+  // What has been counted is remembered, so a reload is not a fresh start.
+  press(client.$('profanity-open'));
+  press(client.$('profanity-open'));
+  assert.match(client.$('profanity-said').textContent, /Counted today: 7 from 2 people/);
+  assert.equal(JSON.parse(client.store.get('eulerchat.swears')).length, 2);
+  assert.equal(client.store.get('eulerchat.forgive'), '5');
+});
+
+test('no tolerance hides the message rather than folding it, and mutes at once', async () => {
+  const client = await loadClient({ storage: { 'eulerchat.forgive': '0' } });
+  arrive(client.emit);
+  clickRoom(client, 'art');
+  const lines = () => [...client.document.querySelectorAll('#log li')].map((li) => li.textContent);
+
+  client.emit(said({ ...wren, id: 'm1', body: 'a civil remark' }));
+  assert.ok(lines().some((line) => line.includes('a civil remark')));
+
+  client.emit(said({ ...wren, id: 'm2', body: 'this is shit' }));
+  assert.equal([...client.document.querySelectorAll('#muted-list li')].length, 1, 'muted at once');
+  assert.match(client.$('notice').textContent, /no tolerance for profanity/);
+  const shown = lines().join(' ');
+  assert.ok(!shown.includes('this is shit'), 'the words are nowhere, not even folded');
+  // Muting somebody folds away what they said before, as muting always does;
+  // the profane one is not in that fold either.
+  const folded = client.document.querySelector('#log .muted-run');
+  assert.ok(folded, 'their earlier words are folded, as a muted person\u2019s are');
+  assert.match(folded.textContent, /A message from someone you muted/);
+});
+
+test('ten a day is what it starts at, and the offer to mute still comes first', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  clickRoom(client, 'art');
+  const offers = () => client.document.querySelectorAll('#log .mute-offer').length;
+  client.emit(said({ ...wren, id: 'm1', body: 'this is shit' }));
+  assert.equal(offers(), 1, 'asked, rather than done to them');
+  assert.equal([...client.document.querySelectorAll('#muted-list li')].length, 0);
+  for (let i = 2; i <= 10; i++) client.emit(said({ ...wren, id: `m${i}`, body: 'this is shit' }));
+  assert.equal([...client.document.querySelectorAll('#muted-list li')].length, 0, 'ten forgiven');
+  client.emit(said({ ...wren, id: 'm11', body: 'this is shit' }));
+  assert.equal([...client.document.querySelectorAll('#muted-list li')].length, 1, 'the eleventh is not');
+});
+
+test('a mute is one person, by the key they proved, and is written down as a digest', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  clickRoom(client, 'art');
+  const press = (node) => node.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  const shown = () => client.$('log').textContent;
+
+  // Four people, one of whom is about to be muted.
+  const people = [
+    { author: 'wren', authorId: 'id-wren', authorKey: 'KEYwren1' },
+    { author: 'rook', authorId: 'id-rook', authorKey: 'KEYrook1' },
+    // No key at all: known by the connection that posted, for this visit only.
+    { author: 'guest', authorId: 'id-guest' },
+    // The same name as the first, under another key: somebody else.
+    { author: 'wren', authorId: 'id-wren2', authorKey: 'KEYwren2' },
+  ];
+  people.forEach((who, i) => client.emit(said({ ...who, id: `m${i}`, body: `from number ${i}` })));
+  assert.equal(client.document.querySelectorAll('#log li').length, 4);
+
+  // Mute the first, from that message's own tray, and answer the question it
+  // asks; see `proposeMute`.
+  const mine = [...client.document.querySelectorAll('#log li')].find((li) => li.textContent.includes('from number 0'));
+  press([...mine.querySelectorAll('button')].find((b) => b.getAttribute('aria-label')?.startsWith('Mute')));
+  press(client.$('mute-ask-yes'));
+
+  assert.doesNotMatch(shown(), /from number 0/, 'that one is folded away');
+  for (const still of ['from number 1', 'from number 2', 'from number 3']) {
+    assert.match(shown(), new RegExp(still), `${still} is untouched`);
+  }
+  assert.equal(client.document.querySelectorAll('#muted-list li').length, 1, 'one person, not everybody');
+
+  // Muting somebody with no key holds for this visit and is not written down.
+  const guest = [...client.document.querySelectorAll('#log li')].find((li) => li.textContent.includes('from number 2'));
+  press([...guest.querySelectorAll('button')].find((b) => b.getAttribute('aria-label')?.startsWith('Mute')));
+  press(client.$('mute-ask-yes'));
+  assert.doesNotMatch(shown(), /from number 2/);
+  const kept = JSON.parse(client.store.get('eulerchat.muted'));
+  assert.equal(kept.length, 1, 'only the one with a key is remembered');
+  assert.match(kept[0].who, /^[0-9a-f]{16}$/);
+});
+
+test('the hose streams the chats you are in, and leads to the chat or the message', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  const press = (node) => node.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  const lines = () => [...client.document.querySelectorAll('.hose-line')];
+
+  // Nothing asked for, and nothing there yet.
+  const before = client.socket.sent.length;
+  press(client.$('hose-open'));
+  assert.ok(client.$('hose').open);
+  assert.deepEqual(client.socket.sent.slice(before), [], 'it is what already arrives, not a request');
+  assert.equal(client.$('hose-none').hidden, false);
+  press(client.$('hose-close'));
+
+  // What arrives goes into it, whichever chat it was said in.
+  client.emit(said({ ...wren, id: 'm1', body: 'said in art' }));
+  client.emit({
+    type: 'message',
+    message: { room: 'art+philosophy', subjects: ['art', 'philosophy'], at: Date.now(), author: 'rook', authorId: 'id-rook', id: 'm2', body: 'said in both' },
+  });
+  // Waiting, since neither is the chat on screen.
+  assert.equal(client.$('hose-waiting').hidden, false);
+
+  press(client.$('hose-open'));
+  assert.equal(client.$('hose-waiting').hidden, true, 'looked at, so nothing is waiting');
+  assert.equal(lines().length, 2);
+  assert.match(lines()[0].textContent, /said in both/, 'newest first');
+  assert.equal(lines()[0].querySelector('.hose-where').textContent, 'art + philosophy');
+  // The same squares the map draws that chat with, one per interest.
+  assert.equal(lines()[0].querySelectorAll('.hose-marks svg.glyph').length, 2);
+  assert.equal(lines()[1].querySelectorAll('.hose-marks svg.glyph').length, 1);
+
+  // View context opens that chat and shuts the hose.
+  press([...lines()[1].querySelectorAll('button')].find((b) => b.textContent === 'View context'));
+  assert.equal(client.$('hose').open, false);
+  assert.equal(client.$('room-title').textContent, 'art');
+
+  // Jump goes to the message itself, and lights it where it stands.
+  press(client.$('hose-open'));
+  press([...lines()[1].querySelectorAll('button')].find((b) => b.textContent === 'Jump'));
+  const lit = client.document.querySelector('#log li.lit');
+  assert.ok(lit, 'the message is lit');
+  assert.equal(lit.dataset.id, 'm1');
+  assert.match(lit.textContent, /said in art/);
+
+  // A message the server has since forgotten says so rather than doing
+  // nothing: a line can outlive the twelve hours the words had.
+  client.emit({ type: 'history', rooms: { art: [] } });
+  press(client.$('hose-open'));
+  press([...lines()[1].querySelectorAll('button')].find((b) => b.textContent === 'Jump'));
+  assert.match(client.$('notice').textContent, /That message has gone/);
+});
+
+test('three seconds of stillness says what is busy nearby, and moving takes it away', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  const stir = () =>
+    client.document.dispatchEvent(
+      Object.assign(new client.document.defaultView.Event('pointermove', { bubbles: true }), { clientX: 5, clientY: 5 }),
+    );
+  const busy = () => client.$('nearby');
+  const chips = () => [...client.$('nearby-list').querySelectorAll('.nearby-chip')];
+
+  // A map with something happening on it, beside what they hold.
+  const stats = (perMinute, ago) => ({ messages: 4, perMinute, last: { at: Date.now() - ago } });
+  client.emit({
+    type: 'atlas',
+    subjects: ['art', 'philosophy'],
+    extent: 1000,
+    zones: [{ key: 'art', subjects: ['art'], population: 9, x: 0, y: 0, room: 60, seed: { x: 0, y: 0 } }],
+    curves: [{ subject: 'art', components: 1, anchor: { x: 0, y: 0, room: 60 }, loops: [[[-60, -60], [60, -60], [60, 60], [-60, 60]]] }],
+    network: [],
+    report: { exact: true, phantoms: 0, vanished: 0, worstError: 0, disconnected: [], worstSplit: 1, wellFormed: true },
+    subscription: ['art'],
+    rooms: [
+      { key: 'art', subjects: ['art'], population: 9, here: 9, member: true, messages: 4, stats: stats(0.4, 30_000), activity: 0.4 },
+      { key: 'art+philosophy', subjects: ['art', 'philosophy'], population: 6, here: 6, member: false, messages: 9, stats: stats(2, 10_000), activity: 0.9 },
+      // Nowhere near what they hold: never offered, however busy.
+      { key: 'karate', subjects: ['karate'], population: 40, here: 40, member: false, messages: 50, stats: stats(9, 1000), activity: 1 },
+    ],
+  });
+
+  assert.equal(busy().hidden, true, 'nothing while anything is happening');
+  await later(3200);
+  assert.equal(busy().hidden, false, 'after three seconds, what is going on');
+  assert.deepEqual(
+    chips().map((chip) => chip.querySelector('.chip-name').textContent),
+    ['art + philosophy', 'art'],
+    'the liveliest first, and nothing from across the map',
+  );
+  assert.match(chips()[0].querySelector('.nearby-why').textContent, /next to art/);
+  assert.match(chips()[1].querySelector('.nearby-why').textContent, /yours, and busy/);
+
+  // Anything at all takes it away again.
+  stir();
+  assert.equal(busy().hidden, true);
+
+  // And one of them opens its chat.
+  await later(3200);
+  chips()[0].dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  assert.equal(client.$('room-title').textContent, 'art and philosophy');
+  assert.equal(busy().hidden, true, 'and it gets out of the way');
+});
+
+test('it keeps quiet for a lurker, and while a sheet is open over the map', async () => {
+  const watching = await loadClient({ href: 'http://localhost:8787/?watch=art' });
+  watching.emit({ type: 'welcome', you: { id: 'u9', name: 'guest-9' }, maxArity: 3 });
+  watching.emit({
+    type: 'watching',
+    room: 'art',
+    subjects: ['art'],
+    population: 12,
+    stats: { messages: 4, perMinute: 0.6, last: null },
+    messages: [],
+    lurkers: 1,
+  });
+  await later(3200);
+  assert.equal(watching.$('nearby').hidden, true, 'a lurker came for one conversation');
+
+  const client = await loadClient();
+  arrive(client.emit);
+  click(client, 'explore-open');
+  await later(3200);
+  assert.equal(client.$('nearby').hidden, true, 'and somebody with a sheet open is in the middle of something');
+});
+
+test('muting asks first, holds the room still, and takes anybody else pressed meanwhile', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  clickRoom(client, 'art');
+  const press = (node) => node.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  const rook = { author: 'rook', authorId: 'id-rook', authorKey: 'KEYrook1' };
+  const muteOn = (body) => {
+    const li = [...client.document.querySelectorAll('#log li')].find((n) => n.textContent.includes(body));
+    press([...li.querySelectorAll('button')].find((b) => b.getAttribute('aria-label')?.startsWith('Mute')));
+  };
+  const shown = () => client.$('log').textContent;
+
+  client.emit(said({ ...wren, id: 'm1', body: 'from wren' }));
+  client.emit(said({ ...rook, id: 'm2', body: 'from rook' }));
+
+  // Pressed, and nothing has happened yet but a question.
+  muteOn('from wren');
+  assert.equal(client.$('mute-ask').hidden, false);
+  assert.match(client.$('mute-ask-said').textContent, /^Mute wren\?/);
+  assert.match(client.$('mute-ask-said').textContent, /for you alone. Nobody is told/);
+  assert.equal(client.document.querySelectorAll('#muted-list li').length, 0, 'not muted yet');
+  assert.match(shown(), /from wren/, 'and still there to read');
+
+  // The room is held still: what arrives is kept back rather than moving it.
+  client.emit(said({ ...rook, id: 'm3', body: 'said while deciding' }));
+  assert.doesNotMatch(shown(), /said while deciding/, 'nothing moves under you');
+
+  // Anybody else pressed meanwhile joins the same question.
+  muteOn('from rook');
+  assert.match(client.$('mute-ask-said').textContent, /^Mute wren and rook\?/);
+  assert.equal(client.$('mute-ask-yes').textContent, 'Mute 2');
+
+  // Answered: both, and the room says how far behind it now is.
+  press(client.$('mute-ask-yes'));
+  assert.equal(client.$('mute-ask').hidden, true);
+  assert.equal(client.document.querySelectorAll('#muted-list li').length, 2);
+  assert.match(client.$('notice').textContent, /Muted 2 people/);
+  assert.equal(client.$('mute-after').hidden, false);
+  assert.match(client.$('mute-after-said').textContent, /1 message arrived while you decided/);
+  // What they said is folded away now, including what arrived meanwhile.
+  assert.doesNotMatch(shown(), /from wren|from rook|said while deciding/);
+  assert.match(shown(), /2 messages from someone you muted|messages from people you muted/);
+
+  // Stay, or go to what has arrived: either way the question goes.
+  press(client.$('mute-after-jump'));
+  assert.equal(client.$('mute-after').hidden, true);
+});
+
+test('a mute question can be answered no, or left behind, and nothing happens', async () => {
+  const client = await loadClient();
+  arrive(client.emit);
+  clickRoom(client, 'art');
+  const press = (node) => node.dispatchEvent(new client.document.defaultView.Event('click', { bubbles: true }));
+  const muteFirst = () => {
+    const li = client.document.querySelector('#log li');
+    press([...li.querySelectorAll('button')].find((b) => b.getAttribute('aria-label')?.startsWith('Mute')));
+  };
+
+  client.emit(said({ ...wren, id: 'm1', body: 'from wren' }));
+  muteFirst();
+  press(client.$('mute-ask-no'));
+  assert.equal(client.$('mute-ask').hidden, true);
+  assert.equal(client.document.querySelectorAll('#muted-list li').length, 0);
+  // And the room runs again: what arrives is drawn.
+  client.emit(said({ ...wren, id: 'm2', body: 'after the question' }));
+  assert.match(client.$('log').textContent, /after the question/);
+
+  // Asked, then gone somewhere else: the question goes with the room.
+  withOffMap(client.emit);
+  clickRoom(client, 'art');
+  muteFirst();
+  assert.equal(client.$('mute-ask').hidden, false);
+  clickRoom(client, 'philosophy');
+  assert.equal(client.$('mute-ask').hidden, true);
+  assert.equal(client.document.querySelectorAll('#muted-list li').length, 0, 'and nobody was muted');
 });

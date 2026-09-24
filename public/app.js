@@ -11,6 +11,9 @@ import { fillCatalogue, showPrompt } from './catalogue.js';
 import { mountPeek } from './peek.js';
 import { contextMenu } from './menu.js';
 import { mountTour } from './tour.js';
+import { statistics } from './stats.js';
+import { mountHose } from './hose.js';
+import { livelyNearby } from './nearby.js';
 import { attachHelp, busyness, createCard, when } from './hints.js';
 import { available, forgetIdentity, rememberedIdentity, seal, unseal } from '../lib/seal.js';
 import { mark, prove } from '../lib/proof.js';
@@ -121,6 +124,28 @@ const state = {
   status: '',
   /** The interests ticked in "Join some"; see `openJoinSome`. */
   joining: null,
+  /** The last statistics worked out here, for copying; see `showStats`. */
+  stats: null,
+  /** How many profane messages a person is forgiven in a day; see `tolerate`. */
+  forgive: 10,
+  /** Who has sworn how much today: person -> {day, count, name}. */
+  swears: new Map(),
+  /** Messages not to draw at all, rather than fold away; see `tolerate`. */
+  hidden: new Set(),
+  /** Messages already read for profanity, so none is counted twice. */
+  considered: new Set(),
+  /** How many have arrived since the hose was last looked at; see `mountHose`. */
+  hoseWaiting: 0,
+  /** The timer that takes the light off a message jumped to. */
+  litFor: null,
+  /** The wait before the page says what is busy nearby; see `watchForStillness`. */
+  stillFor: null,
+  /**
+   * A mute being decided: who it would be about, how much arrived while the
+   * question stood, and where the eye was. Null the rest of the time, and the
+   * room is held still whenever it is not. See `proposeMute`.
+   */
+  muting: null,
   /** Whether what the server writes is folded away; see `hushSystem`. */
   hushSystem: false,
   /**
@@ -436,6 +461,16 @@ function handleFrame(evt) {
       // A lurker's conversation is not among the rooms it holds — it holds none
       // — so it is put back after every history, which would otherwise wipe it.
       if (state.lurking?.log) state.history[state.lurking.key] = state.lurking.log;
+      // What is already in the rooms counts too. A rule about profanity that
+      // only looks at what arrives next would show somebody at no tolerance
+      // the very thing they asked never to see, because it was said a minute
+      // before they got here. Oldest first, so a tally runs up in the order it
+      // was said in.
+      for (const log of Object.values(state.history)) {
+        for (const message of [...(log ?? [])].sort((a, b) => (a.at ?? 0) - (b.at ?? 0))) {
+          considerMuting(message, { ask: false });
+        }
+      }
       renderRoom();
       offerWhatWeKept();
       break;
@@ -469,7 +504,16 @@ function handleFrame(evt) {
       // that prompted it. A sealed one has no words yet; it is asked about
       // once it is opened, below.
       considerMuting(msg.message);
+      // And into the hose, which is every chat at once; see `mountHose`.
+      hose?.add(msg.message, msg.message.room);
+      if (!hose?.isOpen && msg.message.room !== state.selected) {
+        state.hoseWaiting = (state.hoseWaiting ?? 0) + 1;
+        paintHoseWaiting();
+      }
       if (msg.message.room === state.selected) {
+        // What arrived while a mute is being decided is counted, so the room
+        // can say how far behind it is; `renderRoom` is what holds it still.
+        if (state.muting) state.muting.since += 1;
         renderRoom();
         // Just this one, rather than the whole room. The log is rebuilt from
         // scratch on every render, so announcing the list itself re-read every
@@ -640,6 +684,9 @@ function handleFrame(evt) {
       }
       if (explorer?.isOpen) explorer.receive(state.chart);
       paintCatalogue();
+      // Worked out already, and now there is a catalogue to count: the
+      // numbers that were missing fill themselves in. See `showStats`.
+      if (state.stats) showStats();
       break;
 
     case 'unread':
@@ -790,6 +837,13 @@ function notify(text) {
  * clears.
  */
 function select(room) {
+  // A question about muting somebody belongs to the room it was asked in:
+  // going somewhere else answers it with a shrug rather than carrying it.
+  if (state.muting && room !== state.selected) {
+    state.muting = null;
+    $('mute-ask').hidden = true;
+  }
+  $('mute-after').hidden = true;
   state.selected = room;
   delete state.unread[room];
   send({ type: 'seen', room, clear: true });
@@ -2489,6 +2543,249 @@ $('branch-join-some').addEventListener('click', () => {
   if (community) openJoinSome(community.members ?? [], inWords(community.name));
 });
 
+// --- while nobody is doing anything -----------------------------------------------
+
+/** How long the page waits, in milliseconds, before saying what is busy. */
+const IDLE = 3000;
+
+/**
+ * Three seconds of stillness, and the page says what is going on nearby.
+ *
+ * Somebody who has stopped moving is reading or deciding what to read, and it
+ * is only the second that this helps with — so it waits for the stillness
+ * rather than interrupting, and goes the instant anything happens. Worked out
+ * from the map already in hand; see `public/nearby.js`.
+ *
+ * It keeps quiet where it would be in the way: a lurker came for one
+ * conversation, a tour is already pointing at things, and anything with a
+ * sheet open over the map is somebody in the middle of something.
+ */
+function watchForStillness() {
+  const stir = () => {
+    clearTimeout(state.stillFor);
+    hideNearby();
+    state.stillFor = setTimeout(showNearby, IDLE);
+    state.stillFor?.unref?.();
+  };
+  for (const what of ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart']) {
+    document.addEventListener(what, stir, { passive: true });
+  }
+  document.addEventListener('visibilitychange', () => (document.hidden ? hideNearby() : stir()));
+  stir();
+}
+
+function hideNearby() {
+  $('nearby').hidden = true;
+}
+
+/** What is busy near what they hold, as chips that open it. */
+function showNearby() {
+  const busy = $('nearby');
+  const quiet =
+    state.lurking ||
+    tour?.isOn ||
+    hose?.isOpen ||
+    document.hidden ||
+    [...document.querySelectorAll('dialog')].some((sheet) => sheet.open);
+  if (quiet) {
+    busy.hidden = true;
+    return;
+  }
+
+  // A hop away: everything in the communities of what they hold. The chart
+  // marks each interest with its community, so this is one pass over it —
+  // and without a chart, which a page that has never opened All interests has
+  // not got, nearness is what is beside them and nothing further.
+  const held = state.diagram?.subscription ?? [];
+  const home = new Set();
+  const marks = state.chart?.subjects ?? [];
+  for (const subject of marks) {
+    if (subject.c !== undefined && held.includes(subject.id)) home.add(subject.c);
+  }
+  const alongside = marks.filter((subject) => home.has(subject.c)).map((subject) => subject.id);
+
+  const found = livelyNearby({ rooms: currentRooms(), held, alongside });
+
+  const list = $('nearby-list');
+  list.textContent = '';
+  for (const room of found) {
+    const li = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `nearby-chip${room.member ? ' mine' : ''}`;
+    const marks = document.createElement('span');
+    marks.className = 'chip-glyphs';
+    for (const subject of inner(room.subjects).slice(0, 3)) marks.append(glyphSwatch(document, subject, 12));
+    const name = document.createElement('span');
+    name.className = 'chip-name';
+    name.textContent = spoken(room.subjects).join(' + ');
+    const why = document.createElement('span');
+    why.className = 'nearby-why';
+    why.textContent = room.why;
+    button.append(marks, name, why);
+    button.setAttribute('aria-label', `${spoken(room.subjects).join(' and ')}, ${room.why}, ${room.population} people`);
+    button.addEventListener('click', () => {
+      hideNearby();
+      select(room.key);
+    });
+    li.append(button);
+    list.append(li);
+  }
+  busy.hidden = found.length === 0;
+}
+
+watchForStillness();
+
+// --- the hose ---------------------------------------------------------------------
+
+/**
+ * Everything said in the chats this person is in, as it is said.
+ *
+ * Fed from the messages that arrive anyway — nothing is asked of the server
+ * for it — and read newest first. A line wears the same swatches the map draws
+ * its chat with, and leads either to the chat or to the message itself; see
+ * `public/hose.js`.
+ */
+const hose = mountHose(document, {
+  // From the room itself where the map still has it, and from the key when it
+  // does not: a key is its interests joined by a plus, and always was.
+  subjectsOf: (key) => {
+    const room = currentRooms().find((one) => one.key === key);
+    return spoken(room?.subjects ?? String(key).split('+'));
+  },
+  swatch: (doc, subject, size) => glyphSwatch(doc, subject, size),
+  open: (key) => {
+    if (currentRooms().some((room) => room.key === key)) select(key);
+    else notify('That chat is no longer on your map.');
+  },
+  jump: (key, messageId) => {
+    if (!currentRooms().some((room) => room.key === key)) {
+      notify('That chat is no longer on your map.');
+      return;
+    }
+    select(key);
+    // After the room has been drawn, which `select` does synchronously.
+    lightMessage(messageId);
+  },
+  // What is not shown in a chat is not shown here either: somebody muted, and
+  // anything hidden for profanity at no tolerance.
+  hidden: (message) => state.hidden.has(message.id) || isMuted(message),
+});
+
+/** One message, brought into view and lit for a moment where it stands. */
+function lightMessage(messageId) {
+  // Looked for rather than selected: an id is the server's string and may hold
+  // anything a selector would have to be told about, and `CSS.escape` is not
+  // everywhere this runs.
+  const line = [...$('log').children].find((node) => node.dataset?.id === messageId);
+  if (!line) {
+    notify('That message has gone: nothing here is kept longer than twelve hours.');
+    return;
+  }
+  line.scrollIntoView?.({ block: 'center' });
+  line.classList.add('lit');
+  clearTimeout(state.litFor);
+  state.litFor = setTimeout(() => line.classList.remove('lit'), 2400);
+  state.litFor?.unref?.();
+}
+
+/** How many have arrived since the hose was last looked at. */
+function paintHoseWaiting() {
+  const badge = $('hose-waiting');
+  badge.hidden = !state.hoseWaiting;
+  badge.textContent = state.hoseWaiting > 99 ? '99+' : String(state.hoseWaiting);
+}
+
+$('hose-open').addEventListener('click', () => {
+  closePopouts();
+  state.hoseWaiting = 0;
+  paintHoseWaiting();
+  hose?.open();
+});
+
+// --- statistics, worked out here --------------------------------------------------
+
+/**
+ * Numbers about this place, worked out in this browser from what it can
+ * already see: the catalogue All interests is drawn from, the map in front of
+ * it, and this browser's own storage. Nothing is asked of the server for them,
+ * and the working is shown beside the answers, so they can be checked rather
+ * than believed. See `public/stats.js`.
+ */
+function showStats() {
+  // Everything this browser has written down, read here rather than in the
+  // arithmetic: a pure function that goes looking at `localStorage` is a pure
+  // function only until somebody tries to test it.
+  const storage = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      storage.push([key, localStorage.getItem(key) ?? '']);
+    }
+  } catch {
+    /* a private window keeps nothing, which is itself an answer */
+  }
+
+  const { rows, log, missing } = statistics({
+    chart: state.chart,
+    atlas: state.atlas,
+    branch: state.branch?.view ?? null,
+    lurkers: state.lurkers,
+    storage,
+    subscription: state.diagram?.subscription ?? [],
+  });
+
+  const list = $('stats-rows');
+  list.textContent = '';
+  for (const row of rows) {
+    const term = document.createElement('dt');
+    term.textContent = row.label;
+    const said = document.createElement('dd');
+    said.textContent = row.value;
+    list.append(term, said);
+    // The note goes on a line of its own under the pair. Inside the value it
+    // widened that column until the labels beside it wrapped a word to a line.
+    if (row.note) {
+      const note = document.createElement('dd');
+      note.className = 'stats-note';
+      note.textContent = row.note;
+      list.append(note);
+    }
+  }
+  $('stats-missing').textContent = missing.length ? `Not counted yet — ${missing.join('; ')}.` : '';
+  $('stats-log').textContent = log.join('\n');
+  $('stats-working').hidden = false;
+  $('stats-copy').hidden = false;
+  state.stats = { rows, log };
+}
+
+$('stats-go').addEventListener('click', () => {
+  // The catalogue is public, and is the same thing All interests fetches, so
+  // asking for it here is no more than that sheet asks — and without it the
+  // numbers would be half a story on a page that has never opened it.
+  if (!state.chart) send({ type: 'chart' });
+  showStats();
+});
+
+$('stats-copy').addEventListener('click', async () => {
+  const said = state.stats;
+  if (!said) return;
+  const text = [
+    ...said.rows.map((row) => `${row.label}: ${row.value}${row.note ? ` (${row.note})` : ''}`),
+    '',
+    'Worked out in the browser, from what this page can see:',
+    ...said.log,
+  ].join('\n');
+  const label = $('stats-copy').querySelector('.label');
+  try {
+    await navigator.clipboard.writeText(text);
+    label.textContent = 'Copied';
+  } catch {
+    notify('Nothing could be copied here.');
+  }
+  setTimeout(() => (label.textContent = 'Copy'), 1800);
+});
+
 // --- the tour ---------------------------------------------------------------------
 
 /**
@@ -2866,7 +3163,20 @@ function joinPrompt(room) {
 const selectedRoom = () =>
   state.lurking ? state.lurking.room : (currentRooms().find((r) => r.key === state.selected) ?? null);
 
-function renderRoom() {
+/**
+ * The conversation, drawn.
+ *
+ * `keepPlace` puts the scroll back where it was rather than at the newest
+ * message: for somebody who was reading back when the room changed under them,
+ * being thrown to the bottom is the room losing their place for them. See
+ * `confirmMute`.
+ */
+function renderRoom({ keepPlace = null } = {}) {
+  // Held still while a mute is being decided, whatever asked for the redraw:
+  // a message arriving, somebody joining, the map coming back. Every render
+  // after the question is answered happens with `state.muting` already
+  // cleared, so this lets those through. See `proposeMute`.
+  if (state.muting) return;
   const room = selectedRoom();
 
   // Between a membership change and the atlas that follows it there is a
@@ -3018,6 +3328,8 @@ function renderRoom() {
   };
 
   for (const m of messages) {
+    // No tolerance: not folded away, not there at all.
+    if (state.hidden.has(m.id)) continue;
     if ((isMuted(m) || (state.hushSystem && m.machine)) && !state.revealed.has(m.id)) {
       folded.push(m);
       continue;
@@ -3170,7 +3482,7 @@ function renderRoom() {
           ? 'Show what this person says again'
           : 'Stop seeing what this person says. Only you will know';
         hush.setAttribute('aria-label', `${already ? 'Unmute' : 'Mute'} ${m.author}`);
-        hush.addEventListener('click', () => (already ? unmute(person) : mute(m)));
+        hush.addEventListener('click', () => (already ? unmute(person) : proposeMute(m)));
         tray.append(hush);
       }
       // Muting before reporting, and reporting just before deleting: the
@@ -3217,6 +3529,7 @@ function renderRoom() {
       head.append(reply, more, tray);
     }
 
+    li.dataset.id = m.id;
     li.append(head);
     if (quoted) li.append(quoted);
     li.append(text);
@@ -3226,7 +3539,7 @@ function renderRoom() {
     if (offer) log.append(offer);
   }
   fold();
-  log.scrollTop = log.scrollHeight;
+  log.scrollTop = keepPlace === null ? log.scrollHeight : keepPlace;
 }
 
 /**
@@ -4095,11 +4408,52 @@ function discoveryRow(find, held) {
  */
 const MUTED_KEY = 'eulerchat.muted';
 const OFFER_KEY = 'eulerchat.offerMute';
+/** How much profanity is forgiven a day, and what has been counted; see `tolerate`. */
+const FORGIVE_KEY = 'eulerchat.forgive';
+const SWEARS_KEY = 'eulerchat.swears';
+
+/** What may be chosen: how many are forgiven a day, each person counted apart. */
+const FORGIVING = [10, 5, 0];
+
+/** How many messages are remembered as read once; see `considerMuting`. */
+const CONSIDERED_MOST = 5000;
 
 /** Who wrote something, as a mute holds on to it: their key, or their id. */
-function personOf({ authorKey, authorId } = {}) {
+function tagOf({ authorKey, authorId } = {}) {
   if (authorKey) return `key:${authorKey}`;
   return authorId ? `id:${authorId}` : null;
+}
+
+/**
+ * A tag, digested: what the muted list is keyed by and what it writes down.
+ *
+ * Muting is about a person, and the only durable name a person has here is
+ * their key's fingerprint — the letters after their name, which they show by
+ * proving they hold the key. Without one, the best there is is the id of the
+ * connection that posted, which is this visit's name for them and nobody's
+ * tomorrow; those are matched for as long as the page is open and never
+ * written down.
+ *
+ * What is written down is this digest rather than the fingerprint itself, so
+ * a list of everybody you cannot stand is not sitting in your browser in
+ * plain sight. It is a digest and not a secret: anybody holding the
+ * fingerprint can run it through the same three lines and compare. It keeps
+ * the list from being a list; it does not keep a determined reader out.
+ */
+function digestOf(tag) {
+  let a = 0x811c9dc5;
+  let b = 0x01000193;
+  for (let i = 0; i < tag.length; i++) {
+    a = Math.imul(a ^ tag.charCodeAt(i), 0x01000193) >>> 0;
+    b = Math.imul(b + tag.charCodeAt(i) * (i + 1), 0x85ebca6b) >>> 0;
+  }
+  return `${a.toString(16).padStart(8, '0')}${b.toString(16).padStart(8, '0')}`;
+}
+
+/** Who a message is from, as the muted list knows them. */
+function personOf(message) {
+  const tag = tagOf(message);
+  return tag ? digestOf(tag) : null;
 }
 
 const isMuted = (message) => state.muted.has(personOf(message));
@@ -4109,11 +4463,12 @@ const mutedNote = (note) => state.muted.has(personOf({ authorKey: note?.fromKey,
 
 function rememberMutes() {
   try {
-    // Only keys. An id is this server's name for one visit, and by tomorrow
-    // would be somebody else's.
+    // Only people who have a key. An id is this server's name for one visit,
+    // and by tomorrow would be somebody else's — so an id-based mute holds for
+    // as long as the page is open and is never written down.
     const kept = [...state.muted]
-      .filter(([who]) => who.startsWith('key:'))
-      .map(([who, { name, keyId }]) => ({ who, name, keyId }));
+      .filter(([, { byKey }]) => byKey)
+      .map(([who, { name }]) => ({ who, name }));
     localStorage.setItem(MUTED_KEY, JSON.stringify(kept));
   } catch {
     /* a private window: a mute lasts as long as the page */
@@ -4124,8 +4479,12 @@ function restoreMutes() {
   try {
     const saved = JSON.parse(localStorage.getItem(MUTED_KEY) ?? '[]');
     for (const entry of Array.isArray(saved) ? saved : []) {
-      if (typeof entry?.who !== 'string' || !entry.who.startsWith('key:')) continue;
-      state.muted.set(entry.who, { name: String(entry.name ?? ''), keyId: entry.keyId ?? null });
+      if (typeof entry?.who !== 'string' || !entry.who) continue;
+      // Written before this was digested: the fingerprint itself. Taken as
+      // one, digested, and written back digested the next time anything
+      // changes, so an older browser loses none of its mutes.
+      const who = entry.who.startsWith('key:') ? digestOf(entry.who) : entry.who;
+      state.muted.set(who, { name: String(entry.name ?? ''), byKey: true });
     }
     state.offerMutes = localStorage.getItem(OFFER_KEY) !== 'off';
   } catch {
@@ -4133,15 +4492,99 @@ function restoreMutes() {
   }
 }
 
-function mute(message) {
+/**
+ * Muting somebody, asked about first.
+ *
+ * Mute used to happen on the press, which is the wrong shape for the one
+ * action here that is about a person rather than a message: it is easy to hit
+ * by accident on a phone, and the thing it does — folding away everything
+ * somebody says — is invisible afterwards except in Settings.
+ *
+ * So the press puts a question at the foot of the room, and three things are
+ * true while it stands. The room is **held still**, so nothing moves under
+ * somebody reading back to decide. Everything else still works, so other
+ * messages can be read and pressed in the meantime. And pressing mute on
+ * anybody else **adds them to the same question**, since deciding about one
+ * person usually means deciding about the people around them.
+ */
+function proposeMute(message) {
+  const who = personOf(message);
+  if (!who || message.authorId === state.me?.id || state.muted.has(who)) return;
+  state.muting ??= { people: new Map(), since: 0, at: $('log')?.scrollTop ?? 0 };
+  state.muting.people.set(who, { name: message.author, message });
+  paintMuteAsk();
+}
+
+/** The question, as it stands: who it is about, and the way out of it. */
+function paintMuteAsk() {
+  const asking = state.muting;
+  $('mute-ask').hidden = !asking;
+  if (!asking) return;
+  const names = [...asking.people.values()].map((one) => one.name);
+  const said =
+    names.length === 1
+      ? `Mute ${names[0]}?`
+      : `Mute ${names.slice(0, -1).join(', ')} and ${names.at(-1)}?`;
+  $('mute-ask-said').textContent = `${said} Their messages fold away, for you alone. Nobody is told.`;
+  $('mute-ask-yes').textContent = names.length === 1 ? 'Mute' : `Mute ${names.length}`;
+  $('mute-ask-yes').focus?.({ preventScroll: true });
+}
+
+/** Answered yes: the mutes happen, and the room says how far behind it is. */
+function confirmMute() {
+  const asking = state.muting;
+  if (!asking) return;
+  const names = [...asking.people.values()].map((one) => one.name);
+  state.muting = null;
+  $('mute-ask').hidden = true;
+  for (const { message } of asking.people.values()) mute(message, { quiet: true });
+
+  notify(`Muted ${names.length === 1 ? names[0] : `${names.length} people`}. Only you will know. Undo it in Settings.`);
+  // What arrived while the question stood is drawn now, and whoever was
+  // reading chooses whether to go to it. Nothing moves until they say.
+  if (!asking.since) {
+    renderRoom();
+    return;
+  }
+  renderRoom({ keepPlace: asking.at });
+  $('mute-after-said').textContent =
+    `${asking.since} message${asking.since === 1 ? '' : 's'} arrived while you decided.`;
+  $('mute-after').hidden = false;
+  $('mute-after-jump').focus?.({ preventScroll: true });
+}
+
+/** Answered no, or left: nothing is muted and the room runs again. */
+function cancelMute() {
+  if (!state.muting) return;
+  const { at, since } = state.muting;
+  state.muting = null;
+  $('mute-ask').hidden = true;
+  renderRoom(since ? {} : { keepPlace: at });
+}
+
+$('mute-ask-yes').addEventListener('click', confirmMute);
+$('mute-ask-no').addEventListener('click', cancelMute);
+$('mute-after-stay').addEventListener('click', () => {
+  $('mute-after').hidden = true;
+});
+$('mute-after-jump').addEventListener('click', () => {
+  $('mute-after').hidden = true;
+  const log = $('log');
+  log.scrollTop = log.scrollHeight;
+});
+
+function mute(message, { why = null, quiet = false } = {}) {
   const who = personOf(message);
   if (!who || message.authorId === state.me?.id) return;
-  state.muted.set(who, { name: message.author, keyId: message.authorKey ?? null });
+  // Muted by their key where they have one, which is the only name of theirs
+  // that outlives the visit; see `digestOf`.
+  state.muted.set(who, { name: message.author, byKey: Boolean(message.authorKey) });
   state.muteOffers.delete(who);
   rememberMutes();
   paintMuted();
+  if (quiet) return;
   renderRoom();
-  notify(`Muted ${message.author}. Only you will know. Undo it in Settings.`);
+  notify(why ?? `Muted ${message.author}. Only you will know. Undo it in Settings.`);
 }
 
 function unmute(who) {
@@ -4158,11 +4601,13 @@ function unmute(who) {
 function paintMuted() {
   const list = $('muted-list');
   list.textContent = '';
-  for (const [who, { name, keyId }] of state.muted) {
+  for (const [who, { name, byKey }] of state.muted) {
     const li = document.createElement('li');
     const person = document.createElement('span');
     person.className = 'muted-who';
-    person.append(signed(name, keyId));
+    // The digest stands in for the fingerprint it was made from: two people
+    // called wren are still two rows, and neither row is their key.
+    person.append(signed(name, byKey ? who.slice(0, 8) : null));
 
     const undo = document.createElement('button');
     undo.type = 'button';
@@ -4198,13 +4643,144 @@ function paintMuted() {
  * Encrypted messages are included, because this runs where they are opened;
  * the server still sees nothing.
  */
-function considerMuting(message) {
-  if (!state.offerMutes || !message?.body || message.machine || message.authorId === state.me?.id) return;
+function considerMuting(message, { ask = true } = {}) {
+  // A lurker is watching one conversation and leaves nothing behind, tallies
+  // included: muting and counting are for somebody who is here. See
+  // `stopLurking` and **Quick join, to lurk**.
+  if (state.lurking) return;
+  if (!message?.body || message.machine || message.authorId === state.me?.id) return;
+  // Once each. A history frame arrives on every join and carries a hundred
+  // messages a room, and reading every one of them again on each would be the
+  // same words scanned a hundred times over and counted twice.
+  if (state.considered.has(message.id)) return;
+  // Bounded rather than pruned: forgetting the lot costs one extra read of
+  // whatever is still on the screen, and nothing else.
+  if (state.considered.size > CONSIDERED_MOST) state.considered.clear();
+  state.considered.add(message.id);
   const who = personOf(message);
-  if (!who || state.muted.has(who) || state.declined.has(who) || state.muteOffers.has(who)) return;
+  if (!who || state.muted.has(who)) return;
   if (scan(message.body).clean) return;
+  // Counted before anything else: the tolerance is about how often, so each
+  // one counts whether or not an offer was wanted.
+  if (tolerate(who, message)) return;
+  // What was said before somebody arrived is counted, and is never what they
+  // are asked about: an offer is a question about something happening now, and
+  // being met on arrival by a question about a stranger's afternoon is not
+  // that. The tolerance is a standing answer and applies to both.
+  if (!ask || !state.offerMutes || state.declined.has(who) || state.muteOffers.has(who)) return;
   state.muteOffers.set(who, message.id);
 }
+
+/**
+ * How much of it to put up with from one person in a day.
+ *
+ * Ten a day, five a day, or none at all. Counted for each person separately,
+ * since one person's bad afternoon is not everybody's, and forgotten at the
+ * end of the day, because a tally that never resets is a ban with extra steps.
+ * Whoever goes past it is muted here and now — for this browser alone: the
+ * server is not told and nor are they, which is the bargain muting has always
+ * struck here.
+ *
+ * At no tolerance the message is not shown either, not even folded away as a
+ * muted person's words are. Somebody who has asked to see none of it has not
+ * asked to see the first one.
+ *
+ * @returns {boolean}  whether this was dealt with, and needs no offer
+ */
+function tolerate(who, message) {
+  // The day it was said, not the day it was read: a room holds twelve hours,
+  // so what is already in it may be yesterday's, and yesterday's is forgiven.
+  const day = dayOf(message.at ?? Date.now());
+  const seen = state.swears.get(who);
+  const count = (seen?.day === day ? seen.count : 0) + 1;
+  state.swears.set(who, { day, count, name: message.author });
+  rememberSwears();
+  if (count <= state.forgive) return false;
+
+  if (state.forgive === 0) state.hidden.add(message.id);
+  mute(message, {
+    why:
+      state.forgive === 0
+        ? `Muted ${message.author}: no tolerance for profanity here.`
+        : `Muted ${message.author}: ${count} profane messages today, past the ${state.forgive} you forgive.`,
+  });
+  return true;
+}
+
+/** A day, as a tally is kept by: the date where this browser is. */
+const dayOf = (at) => new Date(at).toISOString().slice(0, 10);
+
+/**
+ * What has been counted, kept so that a reload is not a fresh start.
+ *
+ * Today's and yesterday's: a room holds twelve hours, so the messages in it
+ * can span two dates, and a tally for the older of them is still being added
+ * to while that message is still there. Anything before that is gone.
+ *
+ * `save: false` prunes without writing, which is what starting up wants, and a
+ * lurker writes nothing to this device at all.
+ */
+function rememberSwears({ save = true } = {}) {
+  const today = dayOf(Date.now());
+  const yesterday = dayOf(Date.now() - 24 * 60 * 60 * 1000);
+  const kept = [...state.swears].filter(([, seen]) => seen.day === today || seen.day === yesterday);
+  state.swears = new Map(kept);
+  if (!save || state.lurking) return;
+  try {
+    localStorage.setItem(SWEARS_KEY, JSON.stringify(kept));
+  } catch {
+    /* counted for as long as the page is open */
+  }
+}
+
+/** How much is forgiven, on the choices and in what the panel says. */
+function paintForgiving() {
+  for (const box of document.querySelectorAll('#profanity-choices input')) {
+    box.checked = Number(box.value) === state.forgive;
+  }
+  const today = dayOf(Date.now());
+  const counted = [...state.swears.values()].filter((seen) => seen.day === today);
+  const sworn = counted.reduce((sum, seen) => sum + seen.count, 0);
+  $('profanity-said').textContent = sworn
+    ? `Counted today: ${sworn} from ${counted.length} ${counted.length === 1 ? 'person' : 'people'}.`
+    : 'Nothing counted today.';
+}
+
+// Its own toggle rather than the page's: this panel lives inside Settings, and
+// the shared one closes every other popout, Settings included.
+$('profanity-open').addEventListener('click', () => {
+  const open = $('profanity-open').getAttribute('aria-expanded') !== 'true';
+  $('profanity-open').setAttribute('aria-expanded', String(open));
+  $('profanity-pop').hidden = !open;
+  if (open) paintForgiving();
+});
+
+for (const box of document.querySelectorAll('#profanity-choices input')) {
+  box.addEventListener('change', () => {
+    const asked = Number(box.value);
+    state.forgive = FORGIVING.includes(asked) ? asked : 10;
+    try {
+      localStorage.setItem(FORGIVE_KEY, String(state.forgive));
+    } catch {
+      /* it holds for as long as the page is open */
+    }
+    paintForgiving();
+    renderRoom();
+  });
+}
+
+try {
+  // Nothing remembered is not a choice of none. `Number(null)` is 0, which is
+  // one of the three, so an empty browser used to arrive at no tolerance
+  // without anybody asking for it.
+  const kept = localStorage.getItem(FORGIVE_KEY);
+  if (kept !== null && FORGIVING.includes(Number(kept))) state.forgive = Number(kept);
+  state.swears = new Map(JSON.parse(localStorage.getItem(SWEARS_KEY) ?? '[]'));
+} catch {
+  /* nothing remembered here */
+}
+rememberSwears({ save: false });
+paintForgiving();
 
 /** The offer, in the log straight after the message that prompted it. */
 function muteOffer(message) {

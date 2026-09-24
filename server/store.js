@@ -1859,6 +1859,44 @@ export class World {
   }
 
   /**
+   * Forget everything a set of people said, and leave the usual trail.
+   *
+   * Made-up people taken away again would otherwise leave their words behind,
+   * and words outlive their author here: `removeUser` drops a membership and a
+   * profile and touches no message. Those messages would go on counting — in
+   * the tallies a page adds up, in how tall a room stands (`activity`), and in
+   * every dump that carried them — for somebody who is no longer anywhere.
+   *
+   * They go the way everything else goes: with a receipt chained to the one
+   * before it, so a deletion the record does not mention stays the thing the
+   * record exists to catch. See `#receipt`.
+   *
+   * @param {Iterable<string>} userIds
+   * @param {string} [reason]  what the receipt says this was
+   * @returns {object | null}  the receipt, or null if they never said anything
+   */
+  forgetFrom(userIds, reason = 'removed') {
+    const who = userIds instanceof Set ? userIds : new Set(userIds);
+    if (!who.size) return null;
+
+    const gone = [];
+    for (const [roomKey, log] of [...this.messages]) {
+      const keep = log.filter((message) => !who.has(message.authorId));
+      if (keep.length === log.length) continue;
+      for (const message of log) if (who.has(message.authorId)) gone.push(message);
+      if (keep.length) this.messages.set(roomKey, keep);
+      else this.messages.delete(roomKey);
+      this.#said();
+    }
+    if (!gone.length) return null;
+
+    // A vote is about a message, so it goes when the message does, as it does
+    // on the clock's sweep.
+    for (const message of gone) this.votes.delete(message.id);
+    return this.#receipt(gone, reason);
+  }
+
+  /**
    * Delete a single message now, on request, with a receipt like any other.
    *
    * Somebody asking for their own words back is the commonest reason anything

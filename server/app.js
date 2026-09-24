@@ -1077,6 +1077,12 @@ export function createEulerChat(options = {}) {
               break;
             }
             const want = Math.max(0, Math.min(MACHINES_MOST, Math.floor(Number(msg.count) || 0)));
+            // Their words go with them. Nothing here posts on their behalf, but
+            // a demo's traffic does and a world handed in may have, and a
+            // message whose author is gone would go on being counted — in the
+            // tallies, in how tall a room stands, in the dumps. It leaves a
+            // receipt like any other deletion; see `World.forgetFrom`.
+            world.forgetFrom(madeUp);
             for (const id of madeUp) world.removeUser(id);
             madeUp.clear();
             if (want > 0) {

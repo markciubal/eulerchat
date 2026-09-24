@@ -108,3 +108,60 @@ test('everybody connected is told how many there are now', async () => {
     first.stop();
   }
 });
+
+test('taking the made-up people away takes their words with them, with a receipt', async () => {
+  const { world, ws, next, stop } = await open({ machines: true });
+  try {
+    const welcome = await next('welcome');
+    // Somebody real, in a room, who says something that must survive all this.
+    const me = welcome.you.id;
+    const art = [...world.subjects][0];
+    world.join(me, art);
+    const mine = world.post(me, [art], 'said by a person');
+
+    ws.send(JSON.stringify({ type: 'machines', count: 30 }));
+    await next('machines');
+
+    // A made-up one says something too — nothing here posts on their behalf,
+    // but a demo's traffic does, and a world handed in may have.
+    const madeUp = [...world.members.keys()].filter((id) => id !== me);
+    const talker = madeUp.find((id) => [...(world.members.get(id) ?? [])].length);
+    const room = [...world.members.get(talker)][0];
+    const theirs = world.post(talker, [room], 'said by a machine');
+    assert.ok(world.messages.get(room)?.some((m) => m.id === theirs.id));
+    const receiptsBefore = world.deletions.length;
+
+    ws.send(JSON.stringify({ type: 'machines', count: 0 }));
+    await next('machines');
+
+    // Their words are gone from the room, and from what anybody would count.
+    assert.ok(!(world.messages.get(room) ?? []).some((m) => m.id === theirs.id), 'not in the room');
+    const everything = [...world.messages.values()].flat();
+    assert.ok(!everything.some((m) => m.authorId === talker), 'nowhere at all');
+    assert.ok(everything.some((m) => m.id === mine.id), 'and a person’s words are untouched');
+
+    // And it left the usual trail rather than vanishing quietly.
+    assert.equal(world.deletions.length, receiptsBefore + 1);
+    const receipt = world.deletions.at(-1);
+    assert.equal(receipt.reason, 'removed');
+    assert.equal(receipt.count, 1);
+    assert.ok(receipt.hash && receipt.previous !== undefined, 'chained like any other');
+  } finally {
+    stop();
+  }
+});
+
+test('taking away people who said nothing writes no receipt', async () => {
+  const { world, ws, next, stop } = await open({ machines: true });
+  try {
+    await next('welcome');
+    ws.send(JSON.stringify({ type: 'machines', count: 10 }));
+    await next('machines');
+    const before = world.deletions.length;
+    ws.send(JSON.stringify({ type: 'machines', count: 0 }));
+    await next('machines');
+    assert.equal(world.deletions.length, before, 'nothing was said, so nothing was forgotten');
+  } finally {
+    stop();
+  }
+});

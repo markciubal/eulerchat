@@ -409,6 +409,13 @@ export class World {
    */
   browse(at?: string | null, options?: { group?: string | null }): CatalogueLevel;
 
+  /**
+   * Forget everything these people said, with a receipt like any other
+   * deletion. Messages outlive their author — `removeUser` touches none of
+   * them — and would go on being counted; see the `machines` frame.
+   */
+  forgetFrom(userIds: Iterable<string>, reason?: string): object | null;
+
   /** Every occupied interest outside the groups, at its place in the hierarchy: the minimap. */
   overview(): { subjects: ChartSubject[]; extent: number; classified: number };
   /**
